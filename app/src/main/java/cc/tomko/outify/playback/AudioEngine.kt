@@ -5,9 +5,6 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.util.Log
-import androidx.media3.common.C
-import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import cc.tomko.outify.playback.callbacks.PlayerEventCallback
 import java.nio.ByteBuffer
@@ -17,6 +14,8 @@ import kotlin.concurrent.withLock
 import kotlin.math.max
 
 private const val TAG = "AudioEngine"
+private const val MIN_SPEED = 0.25f
+private const val MAX_SPEED = 4f
 
 enum class PcmFormat {
     S16,
@@ -42,10 +41,22 @@ class AudioEngine(
 
     private val pcmBuffer = ByteBuffer.allocateDirect(4 * 8192)
 
-    private val sonic = SonicAudioProcessor()
-    private var sonicSampleRate = -1
-    private var sonicChannels = -1
-    private var sonicCommittedSpeed = 1f
+    /*
+     * Nightcore mode: speed changes tempo AND pitch together (plain resampling,
+     * like speeding up a record), instead of Sonic's pitch-preserving time-stretch.
+     *
+     * Preferred path: let AudioTrack resample natively via setPlaybackRate()
+     * (high quality, no CPU or allocations on our side). If the device rejects
+     * the requested rate (typically above 2x its native output rate), fall back
+     * to a software linear-interpolation resampler that keeps its phase across
+     * PCM chunks so there are no clicks at chunk boundaries.
+     */
+    private var appliedTrackRate = -1
+    private var rejectedTrackRate = -1
+    private var resampleOut: ByteBuffer = ByteBuffer.allocateDirect(0)
+    private var resamplePos = 0.0
+    private var resampleHasPrev = false
+    private val resamplePrev = ShortArray(8)
 
     private val writeLock = ReentrantLock()
 
@@ -149,7 +160,9 @@ class AudioEngine(
 
     fun releaseAudioTrack() {
         writeLock.withLock {
-            resetSonic()
+            resetResampler()
+            appliedTrackRate = -1
+            rejectedTrackRate = -1
             val t = audioTrack ?: return
             try {
                 if (t.playState == AudioTrack.PLAYSTATE_PLAYING) {
@@ -197,7 +210,7 @@ class AudioEngine(
             Log.w(TAG, "pause() failed", e)
         }
         writeLock.withLock {
-            resetSonic()
+            resetResampler()
             audioTrack?.let {
                 try {
                     it.pause()
@@ -214,11 +227,9 @@ class AudioEngine(
         if (stateHolder.playbackIntent.canPlay) outputPaused = false
     }
 
-    private fun resetSonic() {
-        sonic.reset()
-        sonicSampleRate = -1
-        sonicChannels = -1
-        sonicCommittedSpeed = 1f
+    private fun resetResampler() {
+        resamplePos = 0.0
+        resampleHasPrev = false
     }
 
     fun setVolume(volume: Float) {
@@ -229,7 +240,7 @@ class AudioEngine(
 
     fun flush() {
         writeLock.withLock {
-            drainSonic()
+            resetResampler()
             audioTrack?.let {
                 try {
                     it.flush()
@@ -273,13 +284,18 @@ class AudioEngine(
                     return
                 }
 
-                val speed = stateHolder.state.value.playbackSpeed.coerceAtLeast(0.1f)
-                if (speed == 1f) {
+                val speed = stateHolder.state.value.playbackSpeed.coerceIn(MIN_SPEED, MAX_SPEED)
+                val targetRate = if (speed == 1f) sampleRate else (sampleRate * speed).toInt()
+                val nativeOk = applyTrackRate(track, targetRate)
+                if (nativeOk) {
+                    resetResampler()
                     writeToTrack(pcmBuffer, size, track)
                 } else {
-                    prepareSonic(sampleRate, channels, speed)
-                    sonic.queueInput(pcmBuffer)
-                    drainSonicTo(track)
+                    // Device can't resample this far natively: play at the source
+                    // rate and resample in software instead.
+                    applyTrackRate(track, sampleRate)
+                    val out = resamplePcmS16(pcmBuffer, size, channels, speed)
+                    if (out.limit() > 0) writeToTrack(out, out.limit(), track)
                 }
             } catch (ise: IllegalStateException) {
                 Log.e(TAG, "AudioTrack write failed", ise)
@@ -290,55 +306,77 @@ class AudioEngine(
         }
     }
 
-    private fun prepareSonic(sampleRate: Int, channels: Int, speed: Float) {
-        val formatChanged = sampleRate != sonicSampleRate || channels != sonicChannels
-        val speedChanged = speed != sonicCommittedSpeed
-        if (!formatChanged && !speedChanged) return
+    /**
+     * Sets the AudioTrack's playback (resampling) rate. Returns false if the
+     * device rejects it. Cheap to call per chunk: only touches the track on change.
+     */
+    private fun applyTrackRate(track: AudioTrack, rate: Int): Boolean {
+        if (rate == appliedTrackRate) return true
+        if (rate == rejectedTrackRate) return false
+        val result = track.setPlaybackRate(rate)
+        if (result == AudioTrack.SUCCESS) {
+            appliedTrackRate = rate
+            return true
+        }
+        rejectedTrackRate = rate
+        Log.w(TAG, "setPlaybackRate($rate) rejected ($result); using software resampler")
+        return false
+    }
 
-        drainSonic()
+    /**
+     * Software fallback: linear-interpolation resampler for interleaved S16 PCM.
+     * Reading the input [speed] frames per output frame raises tempo and pitch
+     * together. The fractional read position and the last input frame are kept
+     * between calls so consecutive chunks join seamlessly. The output buffer is
+     * reused to avoid allocating on every PCM callback.
+     */
+    private fun resamplePcmS16(
+        input: ByteBuffer,
+        inputSizeBytes: Int,
+        channels: Int,
+        speed: Float,
+    ): ByteBuffer {
+        val ch = channels.coerceIn(1, resamplePrev.size)
+        val bytesPerFrame = 2 * ch
+        val inFrames = inputSizeBytes / bytesPerFrame
 
-        if (formatChanged) {
-            try {
-                sonic.reset()
-                val inputFormat = AudioProcessor.AudioFormat(
-                    sampleRate, channels, C.ENCODING_PCM_16BIT
-                )
-                sonic.configure(inputFormat)
-                sonicSampleRate = sampleRate
-                sonicChannels = channels
-            } catch (e: AudioProcessor.UnhandledAudioFormatException) {
-                Log.e(TAG, "Sonic configure failed", e)
-                sonicSampleRate = -1
-                sonicChannels = -1
-                sonicCommittedSpeed = 1f
-                return
+        val maxOut = (inFrames / speed).toInt() + 2
+        if (resampleOut.capacity() < maxOut * bytesPerFrame) {
+            resampleOut = ByteBuffer.allocateDirect(maxOut * bytesPerFrame * 2)
+                .order(ByteOrder.nativeOrder())
+        }
+        val out = resampleOut
+        out.clear()
+        if (inFrames == 0) {
+            out.limit(0)
+            return out
+        }
+
+        // Frame index -1 refers to the last frame of the previous chunk.
+        fun sample(frame: Int, c: Int): Int =
+            if (frame < 0) resamplePrev[c].toInt()
+            else input.getShort((frame * ch + c) * 2).toInt()
+
+        var pos = if (resampleHasPrev) resamplePos else resamplePos.coerceAtLeast(0.0)
+        val step = speed.toDouble()
+        val last = inFrames - 1
+        while (pos < last && out.remaining() >= bytesPerFrame) {
+            val i = kotlin.math.floor(pos).toInt()
+            val frac = pos - i
+            for (c in 0 until ch) {
+                val s0 = sample(i, c)
+                val s1 = sample(i + 1, c)
+                out.putShort((s0 + (s1 - s0) * frac).toInt().toShort())
             }
+            pos += step
         }
 
-        sonic.setSpeed(speed)
-        sonicCommittedSpeed = speed
-        sonic.flush(AudioProcessor.StreamMetadata.DEFAULT)
-    }
+        for (c in 0 until ch) resamplePrev[c] = input.getShort((last * ch + c) * 2)
+        resampleHasPrev = true
+        resamplePos = pos - inFrames // relative to the next chunk, >= -1
 
-    private fun drainSonicTo(track: AudioTrack) {
-        var output = sonic.getOutput()
-        while (output.hasRemaining()) {
-            writeToTrack(output, output.remaining(), track)
-            output = sonic.getOutput()
-        }
-    }
-
-    private fun drainSonic() {
-        if (sonicSampleRate < 0) return
-        sonic.queueEndOfStream()
-        val track = audioTrack
-        var output = sonic.getOutput()
-        while (track != null && output.hasRemaining()) {
-            writeToTrack(output, output.remaining(), track)
-            output = sonic.getOutput()
-        }
-        sonic.flush(AudioProcessor.StreamMetadata.DEFAULT)
-        sonicCommittedSpeed = 1f
+        out.flip()
+        return out
     }
 
     private fun writeToTrack(buffer: ByteBuffer, size: Int, track: AudioTrack) {

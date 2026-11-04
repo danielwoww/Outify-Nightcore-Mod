@@ -354,7 +354,7 @@ class Player @Inject constructor(
             .setPlaybackState(playbackState)
             .setAvailableCommands(determineCommands())
             .setPlayWhenReady(ps.isPlaying, PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-            .setPlaybackParameters(PlaybackParameters(ps.playbackSpeed))
+            .setPlaybackParameters(PlaybackParameters(ps.playbackSpeed, ps.playbackSpeed))
             .setCurrentMediaItemIndex(if (playlist.isNotEmpty()) 0 else C.INDEX_UNSET)
             .setContentPositionMs(ps.position.active.inWholeMilliseconds)
             .setIsLoading(ps.state == PlayState.BUFFERING)
