@@ -137,7 +137,37 @@ class SpircWrapper @Inject constructor(
     @OptIn(UnstableApi::class)
     private fun startForegroundPlaybackService() {
         val intent = Intent(context, PlaybackService::class.java)
-        ContextCompat.startForegroundService(context, intent)
+        try {
+            // Normal case (user tapped play, app is visible): a plain start is allowed.
+            // Media3 promotes the service to foreground by itself once audio actually
+            // plays. Using startForegroundService() here caused an ANR kill whenever
+            // playback never started (e.g. no playback device selected), because then
+            // nothing ever called startForeground().
+            context.startService(intent)
+        } catch (e: IllegalStateException) {
+            // Background start not allowed: a foreground start is required, and the
+            // service promises to call startForeground() right away.
+            Log.d(TAG, "background service start not allowed, starting in foreground", e)
+            intent.putExtra(PlaybackService.EXTRA_REQUIRE_FOREGROUND, true)
+            ContextCompat.startForegroundService(context, intent)
+        }
+    }
+
+    /**
+     * Makes Outify the active Spotify Connect device before starting new playback.
+     * librespot ignores Load/Play commands while another device (PC, speaker, web
+     * player...) is active, which made song taps do nothing until Outify was picked
+     * manually in "Playback devices". Activate is queued before the following command,
+     * so the load then plays here. No-op when this device is already active.
+     */
+    private fun makeThisDeviceActive() {
+        if (playbackStateHolder.state.value.isActiveDevice) return
+        Log.i(TAG, "not the active device, activating before playback")
+        if (Spirc.activate()) {
+            playbackStateHolder.setActiveDevice(true)
+        } else {
+            Log.w(TAG, "failed to activate this device")
+        }
     }
 
     /** Logs and rejects a command that arrived while the runtime is unavailable. */
@@ -170,6 +200,7 @@ class SpircWrapper @Inject constructor(
             )
         }
 
+        makeThisDeviceActive()
         startForegroundPlaybackService()
         return Spirc.load(context?.toUriString(), playingTrackUri?.toUriString())
     }
@@ -177,6 +208,7 @@ class SpircWrapper @Inject constructor(
     override fun setQueue(uris: Array<String>, playingTrackUri: String?): Boolean {
         if (!requireReady("setQueue")) return false
 
+        makeThisDeviceActive()
         startForegroundPlaybackService()
         return Spirc.setQueue(uris, playingTrackUri)
     }
@@ -190,6 +222,7 @@ class SpircWrapper @Inject constructor(
             savedQueueRepository.setActiveQueueId(null)
         }
 
+        makeThisDeviceActive()
         startForegroundPlaybackService()
         return Spirc.localLoad(uri)
     }
@@ -240,6 +273,7 @@ class SpircWrapper @Inject constructor(
             )
         }
 
+        makeThisDeviceActive()
         startForegroundPlaybackService()
         return Spirc.shuffleLoad(uri)
     }
