@@ -1,379 +1,129 @@
 package cc.tomko.outify.ui.screens.player
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cc.tomko.outify.R
-import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val SPEED_PRESETS = listOf(0.5f, 1f, 1.25f, 1.5f, 1.75f, 2f, 3f, 4f)
-private const val MIN_SPEED = 0.25f
-private const val MAX_SPEED = 4f
+private const val MIN_SPEED = 0.5f
+private const val MAX_SPEED = 3f
+private const val SPEED_STEP = 0.05f
 
-private fun Float.speedLabel(): String {
-    val text = if (this == this.roundToInt().toFloat()) {
-        this.roundToInt().toString()
-    } else {
-        String.format(Locale.US, "%.2f", this).trimEnd('0').trimEnd('.')
-    }
-    return "${text}x"
+/** Snaps to the nearest 0.05 so values don't carry float noise; sticks to 1x when close. */
+private fun Float.snapSpeed(): Float {
+    val snapped = ((this / SPEED_STEP).roundToInt() * SPEED_STEP).coerceIn(MIN_SPEED, MAX_SPEED)
+    return if (abs(snapped - 1f) < 0.03f) 1f else snapped
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private fun Float.speedLabel(): String =
+    String.format(Locale.US, "%.2f", this).trimEnd('0').trimEnd('.') + "x"
+
+/**
+ * Always-visible playback speed slider (0.5x - 3x).
+ * Changes apply live while dragging; tap the speed label to reset to 1x.
+ */
 @Composable
 fun PlaybackSpeedControl(
     currentSpeed: Float,
     onSpeedChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    var showCustomSheet by remember { mutableStateOf(false) }
+    var sliderValue by remember { mutableFloatStateOf(currentSpeed.coerceIn(MIN_SPEED, MAX_SPEED)) }
+    var dragging by remember { mutableStateOf(false) }
 
-    Row(
+    // Follow external speed changes (e.g. from a media controller) when not dragging.
+    LaunchedEffect(currentSpeed) {
+        if (!dragging) sliderValue = currentSpeed.coerceIn(MIN_SPEED, MAX_SPEED)
+    }
+
+    val shownSpeed = sliderValue.snapSpeed()
+    val isNormal = shownSpeed == 1f
+    val playbackSpeedLabel = stringResource(R.string.player_playback_speed)
+
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SpeedCircle(
-            speed = currentSpeed,
-            onClick = { expanded = !expanded },
-        )
-
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandHorizontally(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-                expandFrom = Alignment.Start,
-            ) + fadeIn(),
-            exit = shrinkHorizontally(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessHigh,
-                ),
-                shrinkTowards = Alignment.Start,
-            ) + fadeOut(),
-        ) {
-            Row(
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SPEED_PRESETS.forEach { speed ->
-                    SpeedPill(
-                        label = speed.speedLabel(),
-                        selected = speed == currentSpeed,
-                        onClick = {
-                            onSpeedChange(speed)
-                            expanded = false
-                        },
-                    )
-                }
-                CustomPill(
-                    // Highlighted when current speed isn't one of the presets.
-                    selected = currentSpeed !in SPEED_PRESETS,
-                    onClick = {
-                        showCustomSheet = true
-                        expanded = false
-                    },
-                )
-            }
-        }
-    }
-
-    if (showCustomSheet) {
-        CustomSpeedBottomSheet(
-            currentSpeed = currentSpeed,
-            onDismiss = { showCustomSheet = false },
-            onConfirm = { speed ->
-                onSpeedChange(speed)
-                showCustomSheet = false
-            },
-        )
-    }
-}
-
-@Composable
-private fun SpeedCircle(
-    speed: Float,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = Modifier.size(44.dp),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = speed.speedLabel(),
-                style = TextStyle(
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SpeedPill(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val background = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val content = if (selected) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(50),
-        color = background,
-        modifier = Modifier.height(36.dp),
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 14.dp),
-        ) {
-            Text(
-                text = label,
-                style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
-                color = content,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CustomPill(
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val background = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val content = if (selected) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(50),
-        color = background,
-        modifier = Modifier.height(36.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(start = 6.dp, end = 14.dp),
         ) {
-            Icon(
-                imageVector = Icons.Filled.Tune,
-                contentDescription = null,
-                tint = content,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = stringResource(R.string.common_custom),
-                style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
-                color = content,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CustomSpeedBottomSheet(
-    currentSpeed: Float,
-    onDismiss: () -> Unit,
-    onConfirm: (Float) -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-
-    var sliderValue by remember { mutableFloatStateOf(currentSpeed.coerceIn(MIN_SPEED, MAX_SPEED)) }
-    var textValue by rememberSaveable {
-        mutableStateOf(
-            currentSpeed.speedLabel().removeSuffix("x")
-        )
-    }
-    var textIsInvalid by remember { mutableStateOf(false) }
-
-    // Keep the text field following the slider without fighting user typing.
-    LaunchedEffect(sliderValue) {
-        val fromSlider = sliderValue.speedLabel().removeSuffix("x")
-        if (fromSlider != textValue) textValue = fromSlider
-    }
-
-    fun dismiss() {
-        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-    }
-
-    fun confirm() {
-        val speed = sliderValue.roundToNearestQuarter().coerceIn(MIN_SPEED, MAX_SPEED)
-        scope.launch { sheetState.hide() }.invokeOnCompletion { onConfirm(speed) }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = ::dismiss,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.player_playback_speed),
-                style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            OutlinedTextField(
-                value = textValue,
-                onValueChange = { input ->
-                    textValue = input
-                    val parsed = input.toFloatOrNull()
-                    textIsInvalid = parsed == null || parsed < MIN_SPEED || parsed > MAX_SPEED
-                    if (parsed != null && parsed in MIN_SPEED..MAX_SPEED) {
-                        sliderValue = parsed
-                    }
+            Surface(
+                onClick = {
+                    sliderValue = 1f
+                    onSpeedChange(1f)
                 },
-                label = { Text(stringResource(R.string.player_speed)) },
-                suffix = { Text("x") },
-                singleLine = true,
-                isError = textIsInvalid,
-                supportingText = {
-                    if (textIsInvalid) {
-                        Text(stringResource(R.string.player_speed_range_hint, MIN_SPEED, MAX_SPEED.roundToInt()))
-                    }
+                shape = RoundedCornerShape(50),
+                color = if (isNormal) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.primary
                 },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Decimal,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-            )
-
-            Spacer(Modifier.height(24.dp))
+                modifier = Modifier
+                    .height(32.dp)
+                    .width(56.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = shownSpeed.speedLabel(),
+                        style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                        color = if (isNormal) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onPrimary
+                        },
+                    )
+                }
+            }
 
             Slider(
                 value = sliderValue,
                 onValueChange = { value ->
+                    dragging = true
+                    val previous = sliderValue.snapSpeed()
                     sliderValue = value
-                    textIsInvalid = false
+                    val snapped = value.snapSpeed()
+                    if (snapped != previous) onSpeedChange(snapped)
+                },
+                onValueChangeFinished = {
+                    dragging = false
+                    val snapped = sliderValue.snapSpeed()
+                    sliderValue = snapped
+                    onSpeedChange(snapped)
                 },
                 valueRange = MIN_SPEED..MAX_SPEED,
-                steps = ((MAX_SPEED - MIN_SPEED) / 0.05f).roundToInt() - 1,
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = stringResource(R.string.player_speed_value, MIN_SPEED),
-                    style = TextStyle(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = stringResource(R.string.player_speed_value, MAX_SPEED.roundToInt()),
-                    style = TextStyle(fontSize = 12.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Button(
-                onClick = ::confirm,
-                enabled = !textIsInvalid,
-                shape = RoundedCornerShape(50),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-            ) {
-                Text(stringResource(R.string.player_speed_set, sliderValue.speedLabel()))
-            }
-
-            Spacer(Modifier.height(8.dp))
+                    .weight(1f)
+                    .padding(start = 8.dp)
+                    .semantics { contentDescription = playbackSpeedLabel },
+            )
         }
     }
 }
-
-/** Snaps to the nearest 0.05 so the confirmed value doesn't carry float noise. */
-private fun Float.roundToNearestQuarter(): Float =
-    (this / 0.05f).roundToInt() * 0.05f

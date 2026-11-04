@@ -305,16 +305,11 @@ private fun AlbumCoverContent(
         label = "albumArtScale"
     )
 
-    var showExtraSettings by remember { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(18.dp))
-            .background(containerColor)
-            .clickable {
-                showExtraSettings = !showExtraSettings
-            },
+            .background(containerColor),
         contentAlignment = Alignment.Center,
     ) {
         SmartImage(
@@ -329,12 +324,14 @@ private fun AlbumCoverContent(
                 }
         )
 
-        AnimatedVisibility(visible = showExtraSettings) {
-            PlaybackSpeedControl(
-                currentSpeed = playbackSpeed,
-                onSpeedChange = setPlaybackSpeed,
-            )
-        }
+        PlaybackSpeedControl(
+            currentSpeed = playbackSpeed,
+            onSpeedChange = setPlaybackSpeed,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(10.dp),
+        )
     }
 }
 
