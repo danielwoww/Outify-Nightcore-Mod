@@ -37,6 +37,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -293,6 +297,21 @@ class Player @Inject constructor(
                     engine.resume()
                 }
             }
+        }
+
+        // Persist playback speed across app restarts: restore the saved value,
+        // then save every change (from the slider or a media controller).
+        scope.launch {
+            val saved = settingsRepository.playbackSpeed.first()
+            if (saved != stateHolder.state.value.playbackSpeed) {
+                stateHolder.setSpeed(saved)
+                invalidateState()
+            }
+            stateHolder.state
+                .map { it.playbackSpeed }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { speed -> settingsRepository.setPlaybackSpeed(speed) }
         }
     }
 

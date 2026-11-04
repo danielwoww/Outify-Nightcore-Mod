@@ -53,6 +53,7 @@ class SettingsRepository @Inject constructor(
         val SMART_TRANSFER = booleanPreferencesKey("smart_transfer")
         val BITRATE = stringPreferencesKey("bitrate")
         val CROSSFADE_MILLIS = intPreferencesKey("crossfade_millis")
+        val PLAYBACK_SPEED = floatPreferencesKey("playback_speed")
         val DEVICE_NAME = stringPreferencesKey("device_name")
 
         val USER_ID = stringPreferencesKey("user_id")
@@ -233,6 +234,10 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    val playbackSpeed = dataStore.data.map {
+        it[Keys.PLAYBACK_SPEED] ?: 1f
+    }
+
     val shuffleEnabled = dataStore.data.map {
         it[Keys.SHUFFLE] ?: false
     }
@@ -302,6 +307,10 @@ class SettingsRepository @Inject constructor(
     val userId = dataStore.data.map { it[Keys.USER_ID] }
     val username = dataStore.data.map { it[Keys.USERNAME] }
     val userImageUrl = dataStore.data.map { it[Keys.USER_IMAGE_URL] }
+
+    suspend fun setPlaybackSpeed(speed: Float) {
+        dataStore.edit { it[Keys.PLAYBACK_SPEED] = speed }
+    }
 
     suspend fun setShuffle(enabled: Boolean) {
         dataStore.edit { it[Keys.SHUFFLE] = enabled }

@@ -136,7 +136,8 @@ class PlaybackStateHolder @Inject constructor() {
     }
 
     fun reset() {
-        _state.update { PlaybackState() }
+        // Speed is a user preference, not session state: keep it across resets.
+        _state.update { PlaybackState(playbackSpeed = it.playbackSpeed) }
     }
 
     private fun computePositionLocked(): Duration {
