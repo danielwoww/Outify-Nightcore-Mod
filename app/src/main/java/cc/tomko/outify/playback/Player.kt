@@ -38,7 +38,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -49,6 +50,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.DurationUnit
 import kotlin.time.toDuration
+
+private const val SPEED_SAVE_DEBOUNCE_MS = 400L
 
 @Singleton
 @UnstableApi
@@ -302,16 +305,25 @@ class Player @Inject constructor(
         // Persist playback speed across app restarts: restore the saved value,
         // then save every change (from the slider or a media controller).
         scope.launch {
+            val initial = stateHolder.state.value.playbackSpeed
             val saved = settingsRepository.playbackSpeed.first()
-            if (saved != stateHolder.state.value.playbackSpeed) {
+            // Don't overwrite a speed the user already changed while the setting loaded.
+            if (stateHolder.state.value.playbackSpeed == initial && saved != initial) {
                 stateHolder.setSpeed(saved)
                 invalidateState()
             }
+            var lastSaved = saved
             stateHolder.state
                 .map { it.playbackSpeed }
                 .distinctUntilChanged()
-                .drop(1)
-                .collect { speed -> settingsRepository.setPlaybackSpeed(speed) }
+                .collectLatest { speed ->
+                    if (speed == lastSaved) return@collectLatest
+                    // Debounce: dragging the slider emits every 0.05 step, but only the
+                    // value it settles on needs to be written to disk.
+                    delay(SPEED_SAVE_DEBOUNCE_MS)
+                    settingsRepository.setPlaybackSpeed(speed)
+                    lastSaved = speed
+                }
         }
     }
 
