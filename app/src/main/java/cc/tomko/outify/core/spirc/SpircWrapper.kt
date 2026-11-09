@@ -149,7 +149,13 @@ class SpircWrapper @Inject constructor(
             // service promises to call startForeground() right away.
             Log.d(TAG, "background service start not allowed, starting in foreground", e)
             intent.putExtra(PlaybackService.EXTRA_REQUIRE_FOREGROUND, true)
-            ContextCompat.startForegroundService(context, intent)
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (fgs: IllegalStateException) {
+                // Android 12+ may refuse this too (ForegroundServiceStartNotAllowedException).
+                // Playback can still start; Media3 promotes the service once audio plays.
+                Log.w(TAG, "foreground service start not allowed either", fgs)
+            }
         }
     }
 
@@ -161,13 +167,29 @@ class SpircWrapper @Inject constructor(
      * so the load then plays here. No-op when this device is already active.
      */
     private fun makeThisDeviceActive() {
-        if (playbackStateHolder.state.value.isActiveDevice) return
-        Log.i(TAG, "not the active device, activating before playback")
+        // Always send it: the active-device flag can be stale (e.g. a previous
+        // activation that failed asynchronously), and librespot simply ignores
+        // Activate when this device is already active.
         if (Spirc.activate()) {
             playbackStateHolder.setActiveDevice(true)
         } else {
             Log.w(TAG, "failed to activate this device")
         }
+    }
+
+    /**
+     * Pulls the current Connect session (track, queue, position) to this device
+     * before a transport control (play, next, previous, seek). Without it those
+     * commands are ignored while another device is active, and the native watchdog
+     * then restarts the whole runtime after 30 s, interrupting playback. The
+     * command itself is still sent afterwards: if this device was already active
+     * the transfer is ignored, otherwise the transfer's player events also clear
+     * the watchdog.
+     */
+    private fun takeOverIfInactive() {
+        if (playbackStateHolder.state.value.isActiveDevice) return
+        Log.i(TAG, "not the active device, transferring playback here")
+        if (!Spirc.transfer()) Log.w(TAG, "failed to transfer playback to this device")
     }
 
     /** Logs and rejects a command that arrived while the runtime is unavailable. */
@@ -377,6 +399,7 @@ class SpircWrapper @Inject constructor(
             positionMs = positionMs
         )
 
+        takeOverIfInactive()
         return Spirc.seekTo(positionMs)
     }
 
@@ -388,6 +411,7 @@ class SpircWrapper @Inject constructor(
         if (!requireReady("playerPlay")) return false
 
         playByUser()
+        takeOverIfInactive()
         startForegroundPlaybackService()
         val accepted = Spirc.playerPlay()
         if (accepted) scope.launch { playbackStateHolder.setPlaying(true) }
@@ -419,6 +443,7 @@ class SpircWrapper @Inject constructor(
      */
     override fun playerNext(): Boolean {
         if (!requireReady("playerNext")) return false
+        takeOverIfInactive()
         return Spirc.playerNext()
     }
 
@@ -427,6 +452,7 @@ class SpircWrapper @Inject constructor(
      */
     override fun playerPrevious(): Boolean {
         if (!requireReady("playerPrevious")) return false
+        takeOverIfInactive()
         return Spirc.playerPrevious()
     }
 
