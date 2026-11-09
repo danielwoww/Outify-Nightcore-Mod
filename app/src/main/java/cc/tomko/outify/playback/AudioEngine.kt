@@ -112,7 +112,11 @@ class AudioEngine(
                 else -> 2
             }
             val frameSize = bytesPerSample * max(1, channels)
-            val bufferSize = max(minBufferSize, frameSize * 1024)
+            // Sized for the fastest supported speed: at N x the track drains N times
+            // faster, so a 1x-sized buffer (~20 ms) leaves only a few ms of headroom and
+            // underruns (crackles/dropouts). Pause and seek flush the track, so the
+            // extra size doesn't add control latency.
+            val bufferSize = max(minBufferSize, frameSize * 1024) * MAX_SPEED.toInt()
 
             try {
                 val attrs = AudioAttributes.Builder()
