@@ -61,6 +61,23 @@ if Android refuses that (background start) is `startForegroundService()` used. I
 case `PlaybackService.onStartCommand` immediately satisfies it with a short-lived
 placeholder notification.
 
+### Playback stability fixes
+- **Random playback stops:** `PlaybackService` requested audio focus on its own, next to
+  `Player`'s Media3 `AudioFocusManager`. Android tracks focus per listener, so when the
+  service started during playback, the player got `AUDIOFOCUS_LOSS` and paused. The
+  service no longer requests focus.
+- **Transport controls while another device is active:** play/next/previous/seek
+  first transfer the Connect session here. librespot ignores them otherwise, and the
+  native watchdog then restarted the runtime after 30 s.
+- **Activation:** `Activate` is always sent before user-started playback instead of
+  trusting a possibly stale active-device flag.
+- **Background start:** a refused `startForegroundService()` (Android 12+) is caught
+  instead of crashing.
+- **High speeds:** the `AudioTrack` buffer is sized for the maximum speed, avoiding
+  underruns at 3x.
+- **Speed saving:** a speed changed while the setting loads isn't overwritten, and saves
+  are debounced while dragging.
+
 ## Building on Windows
 
 Prerequisites:
@@ -121,3 +138,30 @@ adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 Debug builds are signed with your local debug key (`~/.android/debug.keystore`). Keep using
 the same PC/key, or Android will refuse to update over an existing install.
+
+### 6. Release build
+`./gradlew assembleRelease` builds minified APKs in `app/build/outputs/apk/release/`.
+They are signed with a release key when these environment variables are set. Otherwise
+they fall back to the debug key:
+
+```bash
+ANDROID_KEYSTORE_FILE=C:/path/to/release.jks
+ANDROID_KEYSTORE_PASSWORD=...
+ANDROID_KEY_ALIAS=...
+ANDROID_KEY_PASSWORD=...
+```
+
+Keep these values in a file outside the repository and load it before building:
+```bash
+set -a; . /c/path/to/signing.env; set +a
+./gradlew assembleRelease
+```
+
+Create a key once with
+`keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias outify -keyalg RSA -keysize 4096 -validity 10000`.
+Back up the keystore and its password. Without them, later releases can't update existing
+installs. APKs signed with a different key than the installed app (e.g. debug vs.
+release) can't update it in place, so the app must be uninstalled first.
+
+Official releases of this fork are signed with a certificate whose SHA-256 is
+`820b607080e4c077580b34505cc9ad6b9a28890b3b15d75a2655e5d7a70006e7`.
