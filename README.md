@@ -39,15 +39,21 @@
 </div>
 
 ### Outify Nightcore Mod
-This is a fork of [iTomKo/Outify](https://github.com/iTomKo/Outify). It changes the following:
+<img src="docs/images/nightcore-player.jpg" alt="Player with the speed slider on the album art" width="220" align="right">
+
+This is a fork of [iTomKo/Outify](https://github.com/iTomKo/Outify), currently based on **Outify 2.0.0**. It changes the following:
 
 - **Nightcore playback speed**: speed changes tempo *and* pitch together, like speeding up a record, instead of pitch-preserving time-stretch
 - **Speed slider**: an always-visible 0.5x – 3x slider on the album art (tap the label to reset to 1x)
 - **Speed is remembered** across app restarts
-- **Outify is the default playback device**: tapping a song plays it on this phone, even if another Spotify device is still listed as active
-- **Fix**: the app no longer gets killed (ANR) while waiting for playback without a device selected
+- **Outify is the default playback device**: tapping a song, or pressing play / next / previous / seek, plays on this phone, even if another Spotify device is still listed as active
+- **Playback stability fixes**: no random stops from an audio-focus conflict, no ANR kill while waiting for playback, and no dropouts at high speeds
 
-See [docs/NIGHTCORE-MOD.md](./docs/NIGHTCORE-MOD.md) for details and Windows build instructions.
+**[Download the latest release](https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest)**. It uses its own signing key, so uninstall the official Outify app first.
+
+See [docs/NIGHTCORE-MOD.md](./docs/NIGHTCORE-MOD.md) for details, build and release instructions, and how to merge upstream updates. The links in the header and below go to the original Outify project. Please don't report problems that only happen in this mod there.
+
+<br clear="right"/>
 
 ### Information
 Third party open source Android Spotify client with Material 3 using librespot Rust
