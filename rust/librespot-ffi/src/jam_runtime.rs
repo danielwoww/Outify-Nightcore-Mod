@@ -13,18 +13,21 @@ use tokio::{
 };
 
 use crate::{
-    jam::{self, Jam},
+    jam::{self, Jam, JoinMode},
     jni_utils::jni_bridge::{self, BridgeArg, JavaCallback},
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 static MANAGER: Lazy<Mutex<Manager>> = Lazy::new(|| Mutex::new(Manager::default()));
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 pub enum Operation {
     Start,
     Current,
     Leave,
+    Kick(String),
+    Info(String),
+    Join(String, JoinMode),
 }
 
 // Startup/reconnect may restore membership, but must never create a social
@@ -32,17 +35,41 @@ pub enum Operation {
 const STARTUP_OPERATION: Operation = Operation::Current;
 
 impl Operation {
-    async fn execute(
-        self,
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Start => "Start",
+            Self::Current => "Current",
+            Self::Leave => "Leave",
+            Self::Kick(_) => "Kick",
+            Self::Info(_) => "Info",
+            Self::Join(_, _) => "Join",
+        }
+    }
+
+    async fn execute<'a, K, I, J>(
+        &'a self,
         start: impl Future<Output = Result<Jam, Error>>,
         current: impl Future<Output = Result<Option<Jam>, Error>>,
         leave: impl Future<Output = Result<(), Error>>,
-    ) -> Result<Option<Jam>, Error> {
-        // These are lazy futures: only the selected endpoint is ever polled.
+        kick: impl FnOnce(&'a str) -> K,
+        info: impl FnOnce(&'a str) -> I,
+        join: impl FnOnce(&'a str, JoinMode) -> J,
+    ) -> Result<Option<Jam>, Error>
+    where
+        K: Future<Output = Result<(), Error>>,
+        I: Future<Output = Result<Jam, Error>>,
+        J: Future<Output = Result<Jam, Error>>,
+    {
         match self {
             Self::Start => start.await.map(Some),
             Self::Current => current.await,
             Self::Leave => leave.await.map(|()| None),
+            Self::Kick(member_id) => {
+                kick(member_id).await?;
+                current.await
+            }
+            Self::Info(token) => info(token).await.map(Some),
+            Self::Join(token, join_mode) => join(token, join_mode.clone()).await.map(Some),
         }
     }
 }
@@ -91,10 +118,45 @@ impl Manager {
         if self.generation != generation || revision.is_some_and(|r| r != self.revision) {
             return false;
         }
+        if self.jam != jam {
+            match &jam {
+                Some(jam) => info!(
+                    "jam: state active (owner={}, members={})",
+                    jam.owner,
+                    jam.members.len()
+                ),
+                None => info!("jam: state inactive (left, ended, or runtime reset)"),
+            }
+        }
         self.revision += 1;
         self.jam = jam;
         self.notify();
         true
+    }
+
+    fn complete_request(
+        &mut self,
+        generation: u64,
+        revision: u64,
+        operation: &Operation,
+        jam: Option<Jam>,
+    ) -> Result<Option<Jam>, String> {
+        if self.generation != generation {
+            return Err("Jam session was replaced or shut down".into());
+        }
+        // Invitation previews belong only to the request callback, not the
+        // active membership or its listener. Do not advance its revision either.
+        if !matches!(operation, Operation::Info(_)) {
+            // A successful leave is authoritative even if someone joined while
+            // it was pending. Reads/starts must not overwrite newer dealer state.
+            let revision = if matches!(operation, Operation::Leave) {
+                None
+            } else {
+                Some(revision)
+            };
+            self.publish(generation, revision, jam.clone());
+        }
+        Ok(jam)
     }
 
     fn reset(&mut self) {
@@ -128,6 +190,7 @@ pub fn initialize(session: &Session) -> Result<(), Error> {
         manager.error("cannot watch a shut down Jam session".into());
         return Err(Error::unavailable("cannot watch a shut down Jam session"));
     }
+    info!("jam: checking for an existing session (read-only)");
     let (tx, mut updates) = mpsc::unbounded_channel();
     let watcher = jam::watch(session.clone(), tx).inspect_err(|error| {
         manager.error(format!("cannot start Jam listener: {error}"));
@@ -161,8 +224,12 @@ pub fn initialize(session: &Session) -> Result<(), Error> {
                 result = &mut initial, if !initial_done => {
                     initial_done = true;
                     match result {
-                        Ok(Some(jam)) => debug!("jam: restored existing session ({} members)", jam.members.len()),
-                        Ok(None) => debug!("jam: no existing session; continuing without a Jam"),
+                        Ok(Some(jam)) => info!(
+                            "jam: restored existing session (owner={}, members={})",
+                            jam.owner,
+                            jam.members.len()
+                        ),
+                        Ok(None) => info!("jam: no active session; continuing without a Jam"),
                         Err(error) => {
                             let manager = MANAGER.lock().unwrap();
                             if manager.generation == task_context.generation {
@@ -193,6 +260,10 @@ pub fn stop() {
     MANAGER.lock().unwrap().reset();
 }
 
+pub fn has_jam() -> bool {
+    MANAGER.lock().unwrap().jam.is_some()
+}
+
 pub fn request(operation: Operation) -> impl Future<Output = Result<Option<Jam>, String>> + Send {
     let context = MANAGER
         .lock()
@@ -203,7 +274,20 @@ pub fn request(operation: Operation) -> impl Future<Output = Result<Option<Jam>,
         .ok_or_else(|| "Jam is unavailable: the Connect session is not running".to_string());
     // Capture the session at JNI submission time, not when the spawned task is
     // eventually polled (which may be after a rebuild).
-    async move { perform(context?, operation).await }
+    async move {
+        // Never log operation payloads, especially invitation tokens.
+        let name = operation.name();
+        info!("jam: {name} request started");
+        let result = match context {
+            Ok(context) => perform(context, operation.clone()).await,
+            Err(error) => Err(error),
+        };
+        match &result {
+            Ok(_) => info!("jam: {name} request succeeded"),
+            Err(error) => warn!("jam: {name} request failed: {error}"),
+        }
+        result
+    }
 }
 
 async fn perform(mut context: Context, operation: Operation) -> Result<Option<Jam>, String> {
@@ -233,16 +317,12 @@ async fn perform(mut context: Context, operation: Operation) -> Result<Option<Ja
                 jam::start(&context.session),
                 jam::current(&context.session),
                 jam::leave(&context.session),
+                |member_id| jam::kick(&context.session, member_id),
+                |token| jam::info(&context.session, token),
+                |token, join_mode| jam::join(&context.session, token, join_mode),
             ).await.map_err(|error| error.to_string())?;
             let mut manager = MANAGER.lock().unwrap();
-            if manager.generation != context.generation {
-                return Err("Jam session was replaced or shut down".to_string());
-            }
-            // A successful leave is authoritative even if someone joined while
-            // it was pending. Reads/starts must not overwrite newer dealer state.
-            let revision = if matches!(operation, Operation::Leave) { None } else { Some(revision) };
-            manager.publish(context.generation, revision, jam.clone());
-            Ok(jam)
+            manager.complete_request(context.generation, revision, &operation, jam)
         }) => result.unwrap_or_else(|_| Err("Jam request timed out".into())),
     }
 }
@@ -257,8 +337,40 @@ mod tests {
                 async { panic!("startup must not create a Jam") },
                 async { current },
                 async { panic!("startup must not leave an existing Jam") },
+                |_| async { panic!("startup must not kick a member") },
+                |_| async { panic!("startup must not preview an invitation") },
+                |_, _| async { panic!("startup must not join a Jam") },
             )
             .await
+    }
+
+    #[tokio::test]
+    async fn kick_passes_member_id_and_returns_refreshed_jam() {
+        let jam = Jam {
+            owner: true,
+            ..Default::default()
+        };
+        let kicked = std::cell::Cell::new(false);
+        let kicked_ref = &kicked;
+        let result = Operation::Kick("member-id".into())
+            .execute(
+                async { panic!("kick must not start a Jam") },
+                async {
+                    assert!(kicked.get(), "refresh must happen after kicking");
+                    Ok(Some(jam.clone()))
+                },
+                async { panic!("kick must not leave the Jam") },
+                |member_id| async move {
+                    assert_eq!(member_id, "member-id");
+                    kicked_ref.set(true);
+                    Ok(())
+                },
+                |_| async { panic!("kick must not preview an invitation") },
+                |_, _| async { panic!("kick must not join a Jam") },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, Some(jam));
     }
 
     #[tokio::test]

@@ -9,7 +9,6 @@ use regex::Regex;
 use crate::{
     jni_utils::{optionable_string, throw_exception, vec_to_jstring_array},
     outifyuri::{OutifyUri, UsernameCache},
-    session::with_session,
     spotify::client::{SavedItemType, get_client},
     spotify::error::SpotifyApiError,
 };
@@ -733,6 +732,66 @@ pub extern "system" fn Java_cc_tomko_outify_core_SpClient_searchContext(
 }
 
 // Gets user collection
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_cc_tomko_outify_core_SpClient_getCollectionSession(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    crate::jni_utils::guard(
+        "SpClient.getCollectionSession",
+        std::ptr::null_mut(),
+        || {
+            let result = crate::session::with_session(crate::collection_session::identity)
+                .and_then(|identity| identity)
+                .and_then(|identity| serde_json::to_string(&identity).map_err(Into::into));
+            match result {
+                Ok(json) => env
+                    .new_string(json)
+                    .map(|value| value.into_raw())
+                    .unwrap_or(std::ptr::null_mut()),
+                Err(error) => {
+                    let _ = env.throw_new("java/lang/IllegalStateException", error.to_string());
+                    std::ptr::null_mut()
+                }
+            }
+        },
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_cc_tomko_outify_core_SpClient_getSavedTrackCollection(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    crate::jni_utils::guard(
+        "SpClient.getSavedTrackCollection",
+        std::ptr::null_mut(),
+        || {
+            let result = (|| -> Result<String, librespot_core::Error> {
+                let session = crate::session::with_session(|session| session.clone())?;
+                let identity = crate::collection_session::identity(&session)?;
+                let tracks =
+                    crate::network_rt().block_on(crate::collection_api::saved_tracks(&session))?;
+                crate::collection_session::ensure_current(&identity)?;
+                Ok(serde_json::json!({"session": identity, "tracks": tracks}).to_string())
+            })();
+            match result {
+                Ok(json) => env
+                    .new_string(json)
+                    .map(|value| value.into_raw())
+                    .unwrap_or(std::ptr::null_mut()),
+                Err(error) => {
+                    let _ = env.throw_new(
+                        "java/lang/IllegalStateException",
+                        format!("Cannot read saved tracks: {error}"),
+                    );
+                    std::ptr::null_mut()
+                }
+            }
+        },
+    )
+}
+
 // Query can be used to get liked songs from artist
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_cc_tomko_outify_core_SpClient_getUserCollection(
@@ -754,37 +813,15 @@ pub extern "system" fn Java_cc_tomko_outify_core_SpClient_getUserCollection(
         }
     };
 
-    let user_id = match with_session(|session| session.username()) {
-        Ok(u) => u,
-        Err(e) => {
-            error!("with_session failed for collection user_id: {e}");
-            return std::ptr::null_mut();
-        }
-    };
-
     let json_res = rt.block_on(async {
-        let uri = match query {
-            Some(ref q) => format!("spotify:user:{}:collection{}", user_id, q),
-            None => format!("spotify:user:{}:collection", user_id),
-        };
-
-        match crate::spclient::get_context(&uri).await {
-            Ok(context) => {
-                let uris: Vec<String> = context
-                    .pages
-                    .iter()
-                    .flat_map(|page| page.tracks.iter())
-                    .map(|track| track.uri().to_string())
-                    .collect();
-
-                match serde_json::to_string(&uris) {
-                    Ok(s) => Ok(s),
-                    Err(e) => {
-                        error!("serde for collection uris failed: {e}");
-                        Err(())
-                    }
+        match crate::spclient::get_collection_uris(query.as_deref()).await {
+            Ok(uris) => match serde_json::to_string(&uris) {
+                Ok(s) => Ok(s),
+                Err(e) => {
+                    error!("serde for collection uris failed: {e}");
+                    Err(())
                 }
-            }
+            },
             Err(e) => {
                 error!("get_context for collection failed: {e}");
                 Err(())
