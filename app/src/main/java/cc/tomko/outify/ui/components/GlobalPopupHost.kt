@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,23 +26,25 @@ import cc.tomko.outify.core.model.toOutifyUri
 import cc.tomko.outify.reccobeats.PendingRecommendation
 import cc.tomko.outify.ui.GlobalPopupController
 import cc.tomko.outify.ui.PopupSpec
-import cc.tomko.outify.ui.components.bottomsheet.AddToPlaylistBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.AddToWidgetBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.ArtistInfoBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.AuthResultBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.BatteryOptimizationBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.CreatePlaylistBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.JamBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.LyricsBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.NotificationPermissionBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.PlaybackDevicesBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.PlaylistInfoBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.RecommendationConfigBottomSheet
-import cc.tomko.outify.ui.components.bottomsheet.TrackInfoBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.account.AuthResultBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.artist.ArtistInfoBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.jam.JamManageBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.jam.JoinJamBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.permissions.BatteryOptimizationBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.permissions.NotificationPermissionBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.playback.LyricsBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.playback.PlaybackDevicesBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.playlist.AddToPlaylistBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.playlist.CreatePlaylistBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.playlist.PlaylistInfoBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.recommendation.RecommendationConfigBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.track.TrackInfoBottomSheet
+import cc.tomko.outify.ui.components.bottomsheet.widget.AddToWidgetBottomSheet
 import cc.tomko.outify.ui.components.navigation.Route
 import cc.tomko.outify.ui.viewmodel.bottomsheet.AddToPlaylistViewModel
 import cc.tomko.outify.ui.viewmodel.bottomsheet.AddToWidgetViewModel
 import cc.tomko.outify.ui.viewmodel.bottomsheet.CreatePlaylistViewModel
+import cc.tomko.outify.ui.viewmodel.bottomsheet.JamInfoViewModel
 import cc.tomko.outify.ui.viewmodel.bottomsheet.LyricsViewModel
 import cc.tomko.outify.ui.viewmodel.bottomsheet.PlaybackDevicesViewModel
 import kotlinx.coroutines.launch
@@ -273,9 +276,30 @@ fun GlobalPopupHost(
             }
 
             is PopupSpec.Jam -> {
-                JamBottomSheet(
+                JamManageBottomSheet(
                     viewModel = playbackDevicesViewModel,
                     onDismiss = { GlobalPopupController.dismiss(popup.id) },
+                )
+            }
+
+            is PopupSpec.JamJoin -> {
+                val jamInfoViewModel: JamInfoViewModel = hiltViewModel(key = popup.id)
+                val joinSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                JoinJamBottomSheet(
+                    viewModel = jamInfoViewModel,
+                    jamToken = popup.token,
+                    onDismiss = { GlobalPopupController.dismiss(popup.id) },
+                    onJoin = {
+                        scope.launch {
+                            if (jamInfoViewModel.join(popup.token, it) &&
+                                GlobalPopupController.popups.value.any { current -> current.id == popup.id }
+                            ) {
+                                joinSheetState.hide()
+                                GlobalPopupController.replace(popup.id, PopupSpec.Jam())
+                            }
+                        }
+                    },
+                    sheetState = joinSheetState,
                 )
             }
 

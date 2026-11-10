@@ -48,4 +48,10 @@ interface SessionCallback {
      * Called when initialization or a rebuild gave up
      */
     fun onFailed(reason: String)
+
+    /** Saved tracks changed; the JSON identity identifies the originating native session. */
+    fun onCollectionChanged(sessionJson: String)
+
+    /** Ordered track add/remove deltas, encoded as JSON by the native dealer listener. */
+    fun onCollectionDelta(changesJson: String)
 }

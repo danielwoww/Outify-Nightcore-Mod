@@ -1,10 +1,13 @@
+use std::str::FromStr;
+
 use jni::{
     JNIEnv,
-    objects::{JClass, JObject},
-    sys::jboolean,
+    objects::{JClass, JObject, JString},
+    sys::{JNI_FALSE, jboolean},
 };
 
 use crate::{
+    jam::JoinMode,
     jam_runtime::{self, Operation},
     jni_utils::{
         guard,
@@ -109,4 +112,77 @@ pub extern "system" fn Java_cc_tomko_outify_core_jam_JamNative_leave(
     callback: JObject,
 ) -> jboolean {
     request(env, callback, Operation::Leave)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_cc_tomko_outify_core_jam_JamNative_kick(
+    mut env: JNIEnv,
+    _this: JClass,
+    member_id: jni::objects::JString,
+    callback: JObject,
+) -> jboolean {
+    guard("Jam.kick", JNI_FALSE, || {
+        let member_id = match env.get_string(&member_id) {
+            Ok(m) => m.into(),
+            Err(e) => {
+                error!("cannot read Jam kick member ID: {e}");
+                return JNI_FALSE;
+            }
+        };
+        request(env, callback, Operation::Kick(member_id))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_cc_tomko_outify_core_jam_JamNative_info(
+    mut env: JNIEnv,
+    _this: JClass,
+    token: JString,
+    callback: JObject,
+) -> jboolean {
+    guard("Jam.info", JNI_FALSE, || {
+        let token: String = match env.get_string(&token) {
+            Ok(value) => value.into(),
+            Err(error) => {
+                error!("cannot read Jam invitation token: {error}");
+                return JNI_FALSE;
+            }
+        };
+        request(env, callback, Operation::Info(token))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_cc_tomko_outify_core_jam_JamNative_join(
+    mut env: JNIEnv,
+    _this: JClass,
+    token: JString,
+    join_mode: JString,
+    callback: JObject,
+) -> jboolean {
+    guard("Jam.join", JNI_FALSE, || {
+        let token: String = match env.get_string(&token) {
+            Ok(value) => value.into(),
+            Err(error) => {
+                error!("cannot read Jam join token: {error}");
+                return JNI_FALSE;
+            }
+        };
+        let join_mode_str: String = match env.get_string(&join_mode) {
+            Ok(value) => value.into(),
+            Err(error) => {
+                error!("cannot read Jam join mode: {error}");
+                return JNI_FALSE;
+            }
+        };
+        let join_mode = match JoinMode::from_str(join_mode_str.as_str()) {
+            Ok(mode) => mode,
+            Err(error) => {
+                error!("failed to convert string into JoinMode: {error}");
+                return JNI_FALSE;
+            }
+        };
+
+        request(env, callback, Operation::Join(token, join_mode))
+    })
 }
