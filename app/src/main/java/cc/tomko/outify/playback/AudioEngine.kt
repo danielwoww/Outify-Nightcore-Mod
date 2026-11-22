@@ -228,7 +228,7 @@ class AudioEngine(
 
     fun resume() {
         // Start the track on the next PCM frame, never from a stale status alone.
-        if (stateHolder.playbackIntent.canPlay) outputPaused = false
+        if (stateHolder.localPlaybackAllowed && stateHolder.playbackIntent.canPlay) outputPaused = false
     }
 
     private fun resetResampler() {
@@ -265,7 +265,7 @@ class AudioEngine(
      */
     fun onPcmReady(size: Int, sampleRate: Int, channels: Int) {
         writeLock.withLock {
-            if (outputPaused || !stateHolder.playbackIntent.canPlay) return
+            if (outputPaused || !stateHolder.localPlaybackAllowed || !stateHolder.playbackIntent.canPlay) return
             pcmBuffer.order(ByteOrder.nativeOrder())
 
             if (!ensureAudioTrack(sampleRate, channels, PcmFormat.S16)) {
@@ -288,7 +288,7 @@ class AudioEngine(
                     return
                 }
 
-                val speed = stateHolder.state.value.playbackSpeed.coerceIn(MIN_SPEED, MAX_SPEED)
+                val speed = stateHolder.localSpeed.value.coerceIn(MIN_SPEED, MAX_SPEED)
                 val targetRate = if (speed == 1f) sampleRate else (sampleRate * speed).toInt()
                 val nativeOk = applyTrackRate(track, targetRate)
                 if (nativeOk) {

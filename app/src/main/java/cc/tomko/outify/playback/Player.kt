@@ -17,12 +17,13 @@ import cc.tomko.outify.R
 import cc.tomko.outify.core.model.CoverSize
 import cc.tomko.outify.core.model.Episode
 import cc.tomko.outify.core.model.Track
+import cc.tomko.outify.core.model.PlayableAudio
+import cc.tomko.outify.core.model.asInt
 import cc.tomko.outify.core.model.getCover
 import cc.tomko.outify.core.model.toPlayableAudio
 import cc.tomko.outify.core.spirc.SpircWrapper
 import cc.tomko.outify.data.repository.SettingsRepository
 import cc.tomko.outify.playback.callbacks.PlayerEventCallback
-import cc.tomko.outify.playback.model.PlayState
 import cc.tomko.outify.playback.model.RepeatMode
 import cc.tomko.outify.services.PlaybackService
 import coil3.Bitmap
@@ -82,7 +83,9 @@ class Player @Inject constructor(
             application.applicationContext,
             object : PlayerEventCallback {
                 override fun onTrackChange(spotify_uri: String, json_str: String) {
+                    val generation = stateHolder.captureLocalEvent()
                     scope.launch {
+                        if (!stateHolder.acceptsLocalEvent(generation)) return@launch
                         val audio = if (spotify_uri.startsWith("spotify:episode:")) {
                             val episode: Episode = try {
                                 json.decodeFromString(json_str)
@@ -101,83 +104,6 @@ class Player @Inject constructor(
                             track.toPlayableAudio()
                         }
                         stateHolder.setAudio(audio)
-
-                        val cover = if (audio.isEpisode()) {
-                            audio.covers.firstOrNull()
-                        } else {
-                            audio.sourceTrack?.album?.getCover(CoverSize.LARGE)
-                        }
-                        val artworkUrl = cover?.let { ALBUM_COVER_URL + it.uri }
-                        currentArtworkUri = artworkUrl
-
-                        currentArtworkBitmap = null;
-                        currentArtworkBytes = null;
-
-                        invalidateState()
-
-                        artworkJob?.cancel()
-
-                        if (artworkUrl == null) return@launch
-
-                        artworkJob = scope.launch {
-                            val loadResult = withContext(Dispatchers.IO) {
-                                try {
-                                    val request = ImageRequest.Builder(application)
-                                        .data(artworkUrl)
-                                        .allowHardware(false)
-                                        .build()
-
-                                    val result = imageLoader.execute(request)
-                                    val bmp = result.image?.toBitmap()
-
-                                    val finalBmp = bmp?.let {
-                                        val max = 1024
-                                        if (it.width > max || it.height > max) {
-                                            val ratio = minOf(
-                                                max.toFloat() / it.width,
-                                                max.toFloat() / it.height
-                                            )
-                                            it.scale(
-                                                (it.width * ratio).toInt(),
-                                                (it.height * ratio).toInt()
-                                            )
-                                        } else it
-                                    }
-
-                                    val bytes = finalBmp?.let { fb ->
-                                        ByteArrayOutputStream().use { stream ->
-                                            fb.compress(
-                                                android.graphics.Bitmap.CompressFormat.PNG,
-                                                100,
-                                                stream
-                                            )
-                                            stream.toByteArray()
-                                        }
-                                    }
-
-                                    Pair(finalBmp, bytes)
-                                } catch (e: Exception) {
-                                    Log.w("Player", "artwork load failed", e)
-                                    null
-                                }
-                            }
-
-                            if (loadResult == null) return@launch
-
-                            val (loadedBitmap, loadedBytes) = loadResult
-
-                            val currentTrackId = stateHolder.state.value.currentAudio?.id
-                            if (currentTrackId != audio.id) {
-                                return@launch
-                            }
-
-                            withContext(Dispatchers.Main) {
-                                currentArtworkBitmap = loadedBitmap
-                                currentArtworkBytes = loadedBytes
-
-                                invalidateState()
-                            }
-                        }
                     }
                 }
 
@@ -186,11 +112,12 @@ class Player @Inject constructor(
                     position_ms: Long,
                     json_raw: String
                 ) {
+                    val generation = stateHolder.captureLocalEvent()
                     scope.launch {
+                        if (!stateHolder.acceptsLocalEvent(generation)) return@launch
                         stateHolder.seekTo(position_ms.toDuration(DurationUnit.MILLISECONDS))
 
-                        val currentAudio = stateHolder.state.value.currentAudio
-                        if (spotify_uri.startsWith("spotify:episode:") && currentAudio?.isEpisode() != true) {
+                        if (spotify_uri.startsWith("spotify:episode:") && stateHolder.needsLocalMetadata(spotify_uri)) {
                             val episode: Episode? = try {
                                 json.decodeFromString(json_raw)
                             } catch (e: Exception) {
@@ -202,7 +129,7 @@ class Player @Inject constructor(
                                 null
                             }
                             episode?.let { stateHolder.setAudio(it.toPlayableAudio()) }
-                        } else if (spotify_uri.startsWith("spotify:track:") && currentAudio?.isTrack() != true) {
+                        } else if (spotify_uri.startsWith("spotify:track:") && stateHolder.needsLocalMetadata(spotify_uri)) {
                             val track: Track? = try {
                                 json.decodeFromString(json_raw)
                             } catch (e: Exception) {
@@ -217,8 +144,11 @@ class Player @Inject constructor(
                 }
 
                 override fun onPlayingStatus(playing: Boolean) {
+                    val generation = stateHolder.captureLocalEvent()
+                    if (!stateHolder.localPlaybackAllowed) { engine.pause(); return }
                     if (!playing || !stateHolder.playbackIntent.canPlay) engine.pause()
                     scope.launch {
+                        if (!stateHolder.acceptsLocalEvent(generation)) return@launch
                         if (playing && stateHolder.playbackIntent.canPlay) {
                             val command = audioFocusManager.updateAudioFocus(true, STATE_READY)
                             if (command == AudioFocusManager.PLAYER_COMMAND_PLAY_WHEN_READY) {
@@ -240,7 +170,9 @@ class Player @Inject constructor(
                 }
 
                 override fun onShuffleChanged(shuffle: Boolean) {
+                    val generation = stateHolder.captureLocalEvent()
                     scope.launch {
+                        if (!stateHolder.acceptsLocalEvent(generation)) return@launch
                         stateHolder.setShuffleEnabled(shuffle)
                         invalidateState()
                         // Persist the runtime state without sending another Connect command.
@@ -249,7 +181,9 @@ class Player @Inject constructor(
                 }
 
                 override fun onRepeatChanged(context: Boolean, track: Boolean) {
+                    val generation = stateHolder.captureLocalEvent()
                     scope.launch {
+                        if (!stateHolder.acceptsLocalEvent(generation)) return@launch
                         stateHolder.setRepeatMode(RepeatMode.fromSettings(context, track))
                         invalidateState()
                         settingsRepository.setRepeatMode(context, track)
@@ -268,6 +202,7 @@ class Player @Inject constructor(
             }
 
             override fun executePlayerCommand(command: Int) {
+                if (!stateHolder.localPlaybackAllowed) { engine.pause(); return }
                 when (command) {
                     AudioFocusManager.PLAYER_COMMAND_WAIT_FOR_CALLBACK,
                     AudioFocusManager.PLAYER_COMMAND_DO_NOT_PLAY -> {
@@ -291,6 +226,7 @@ class Player @Inject constructor(
         audioFocusManager.setAudioAttributes(PlaybackService.AUDIO_ATTRIBUTES)
         scope.launch {
             stateHolder.playbackIntent.state.collect { intent ->
+                if (!stateHolder.localPlaybackAllowed) { engine.pause(); return@collect }
                 if (!intent.canPlay) {
                     engine.pause()
                     stateHolder.setPlaying(false)
@@ -305,17 +241,17 @@ class Player @Inject constructor(
         // Persist playback speed across app restarts: restore the saved value,
         // then save every change (from the slider or a media controller).
         scope.launch {
-            val initial = stateHolder.state.value.playbackSpeed
+            // localSpeed, not state.playbackSpeed: while another Connect device owns
+            // playback the state shows that device's speed, which must not be saved.
+            val initial = stateHolder.localSpeed.value
             val saved = settingsRepository.playbackSpeed.first()
             // Don't overwrite a speed the user already changed while the setting loaded.
-            if (stateHolder.state.value.playbackSpeed == initial && saved != initial) {
+            if (stateHolder.localSpeed.value == initial && saved != initial) {
                 stateHolder.setSpeed(saved)
                 invalidateState()
             }
             var lastSaved = saved
-            stateHolder.state
-                .map { it.playbackSpeed }
-                .distinctUntilChanged()
+            stateHolder.localSpeed
                 .collectLatest { speed ->
                     if (speed == lastSaved) return@collectLatest
                     // Debounce: dragging the slider emits every 0.05 step, but only the
@@ -324,6 +260,67 @@ class Player @Inject constructor(
                     settingsRepository.setPlaybackSpeed(speed)
                     lastSaved = speed
                 }
+        }
+
+        scope.launch {
+            var audio: PlayableAudio? = null
+            var outputPlaying = false
+            stateHolder.state.collect { state ->
+                if (!stateHolder.localPlaybackAllowed) {
+                    engine.pause()
+                    audioFocusManager.updateAudioFocus(false, STATE_IDLE)
+                }
+                val shouldPlay = stateHolder.localPlaybackAllowed && state.isPlaying && stateHolder.playbackIntent.canPlay
+                if (shouldPlay && !outputPlaying) {
+                    val command = audioFocusManager.updateAudioFocus(true, STATE_READY)
+                    if (command == AudioFocusManager.PLAYER_COMMAND_PLAY_WHEN_READY) engine.resume()
+                    else spirc.pauseForAudioFocus()
+                }
+                outputPlaying = shouldPlay
+                if (audio != state.currentAudio) {
+                    audio = state.currentAudio
+                    updateArtwork(audio)
+                }
+                invalidateState()
+            }
+        }
+    }
+
+    private fun updateArtwork(audio: PlayableAudio?) {
+        artworkJob?.cancel()
+        val cover = audio?.covers?.firstOrNull { it.size == CoverSize.LARGE.asInt() }
+            ?: audio?.covers?.firstOrNull()
+        val url = cover?.let { ALBUM_COVER_URL + it.uri }
+        currentArtworkUri = url
+        currentArtworkBitmap = null
+        currentArtworkBytes = null
+        if (url == null) return
+        artworkJob = scope.launch {
+            try {
+                val (bitmap, bytes) = withContext(Dispatchers.IO) {
+                    val result = imageLoader.execute(ImageRequest.Builder(application).data(url).allowHardware(false).build())
+                    val original = result.image?.toBitmap()
+                    val bitmap = original?.let {
+                        val ratio = minOf(1f, 1024f / maxOf(it.width, it.height))
+                        if (ratio < 1f) it.scale((it.width * ratio).toInt(), (it.height * ratio).toInt()) else it
+                    }
+                    val bytes = bitmap?.let {
+                        ByteArrayOutputStream().use { stream ->
+                            it.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+                            stream.toByteArray()
+                        }
+                    }
+                    bitmap to bytes
+                }
+                if (stateHolder.state.value.currentAudio != audio) return@launch
+                currentArtworkBitmap = bitmap
+                currentArtworkBytes = bytes
+                invalidateState()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("Player", "artwork load failed", error)
+            }
         }
     }
 
@@ -371,12 +368,7 @@ class Player @Inject constructor(
                 .build()
         )
 
-        val playbackState = when {
-            ps.state == PlayState.BUFFERING -> STATE_BUFFERING
-            playlist.isEmpty() -> STATE_IDLE
-            ps.isPlaying -> STATE_READY
-            else -> STATE_READY
-        }
+        val playbackState = if (ps.isBuffering) STATE_BUFFERING else STATE_READY
 
         return State.Builder()
             .setAudioAttributes(PlaybackService.AUDIO_ATTRIBUTES)
@@ -388,12 +380,16 @@ class Player @Inject constructor(
             .setPlaybackParameters(PlaybackParameters(ps.playbackSpeed, ps.playbackSpeed))
             .setCurrentMediaItemIndex(if (playlist.isNotEmpty()) 0 else C.INDEX_UNSET)
             .setContentPositionMs(ps.position.active.inWholeMilliseconds)
-            .setIsLoading(ps.state == PlayState.BUFFERING)
+            .setIsLoading(ps.isBuffering)
             .setPlaylist(playlist)
             .build()
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        if (!stateHolder.localPlaybackAllowed) {
+            if (playWhenReady) spirc.playerPlay() else spirc.playerPause()
+            return Futures.immediateVoidFuture()
+        }
         if (!playWhenReady) {
             spirc.playerPause()
             engine.pause()
@@ -422,13 +418,13 @@ class Player @Inject constructor(
     ): ListenableFuture<*> {
 //        spirc.seekTo(mediaItemIndex, positionMs)
         when (seekCommand) {
-            COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> scope.launch(Dispatchers.IO) { spirc.playerPrevious() }
-            COMMAND_SEEK_TO_PREVIOUS -> scope.launch(Dispatchers.IO) { spirc.playerPrevious() }
+            COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> spirc.playerPrevious()
+            COMMAND_SEEK_TO_PREVIOUS -> spirc.playerPrevious()
 
-            COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> scope.launch(Dispatchers.IO) { spirc.playerNext() }
-            COMMAND_SEEK_TO_NEXT -> scope.launch(Dispatchers.IO) { spirc.playerNext() }
+            COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> spirc.playerNext()
+            COMMAND_SEEK_TO_NEXT -> spirc.playerNext()
 
-            COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> scope.launch(Dispatchers.IO) {
+            COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> scope.launch {
                 spirc.seekTo(positionMs)
             }
         }
@@ -465,6 +461,7 @@ class Player @Inject constructor(
     }
 
     fun setSpeed(speed: Float) {
+        if (!stateHolder.localPlaybackAllowed) return
         scope.launch {
             stateHolder.setSpeed(speed)
             invalidateState()
@@ -488,6 +485,17 @@ class Player @Inject constructor(
     }
 
     private fun determineCommands(): Player.Commands {
+        if (!stateHolder.localPlaybackAllowed) {
+            val allowed = spirc.connectPlayback.snapshot.value?.allowed.orEmpty()
+            return Player.Commands.Builder()
+                .add(COMMAND_GET_CURRENT_MEDIA_ITEM).add(COMMAND_GET_METADATA)
+                .apply {
+                    if ("resume" in allowed || "pause" in allowed) add(COMMAND_PLAY_PAUSE)
+                    if ("seek_to" in allowed) add(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                    if ("skip_next" in allowed) { add(COMMAND_SEEK_TO_NEXT); add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) }
+                    if ("skip_prev" in allowed) { add(COMMAND_SEEK_TO_PREVIOUS); add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) }
+                }.build()
+        }
         val builder = Player.Commands.Builder()
             .add(COMMAND_PLAY_PAUSE)
             .add(COMMAND_PREPARE)

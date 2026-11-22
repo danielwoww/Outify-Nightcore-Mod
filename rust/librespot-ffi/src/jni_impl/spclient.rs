@@ -1,16 +1,13 @@
 use jni::{
     JNIEnv,
-    objects::{JClass, JObject, JObjectArray, JString},
+    objects::{JClass, JObjectArray, JString},
     sys::{jboolean, jint, jobjectArray, jstring},
 };
 use librespot_core::{SpotifyId, SpotifyUri};
-use regex::Regex;
+use protobuf::Message;
 
 use crate::{
-    jni_utils::{optionable_string, throw_exception, vec_to_jstring_array},
-    outifyuri::{OutifyUri, UsernameCache},
-    spotify::client::{SavedItemType, get_client},
-    spotify::error::SpotifyApiError,
+    jni_utils::{optionable_string, throw_exception, vec_to_jstring_array}, outifyuri::{OutifyUri, UsernameCache}, spotify::{client::{SavedItemType, SpotifyClient}, error::SpotifyApiError},
 };
 
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_username")]
@@ -34,7 +31,7 @@ pub extern "system" fn username(env: JNIEnv, _class: JClass) -> jstring {
 
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getCurrentUserProfile")]
 pub extern "system" fn get_current_user(env: JNIEnv, _class: JClass) -> jstring {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let rt = crate::network_rt();
 
@@ -42,12 +39,12 @@ pub extern "system" fn get_current_user(env: JNIEnv, _class: JClass) -> jstring 
         Ok(r) => match serde_json::to_string(&r) {
             Ok(j) => j,
             Err(e) => {
-                error!("serde for current user failed: {e}");
+                error!("serde for playback current user failed: {e}");
                 return std::ptr::null_mut();
             }
         },
         Err(e) => {
-            error!("get_current_user api call failed: {e}");
+            error!("get_current_user_playback api call failed: {e}");
             return std::ptr::null_mut();
         }
     };
@@ -55,7 +52,7 @@ pub extern "system" fn get_current_user(env: JNIEnv, _class: JClass) -> jstring 
     match env.new_string(&result) {
         Ok(s) => s.into_raw(),
         Err(e) => {
-            error!("jni new_string failed for current user result: {e}");
+            error!("jni new_string failed for playback current user result: {e}");
             return std::ptr::null_mut();
         }
     }
@@ -70,7 +67,7 @@ pub extern "system" fn spotify_search(
     offset: jint,
     limit: jint,
 ) -> jobjectArray {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let query: String = match env.get_string(&query) {
         Ok(q) => q.into(),
@@ -99,6 +96,10 @@ pub extern "system" fn spotify_search(
         Ok(u) => u,
         Err(e) => {
             error!("spotify search api failed: {e}");
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Spotify search failed: {e}"),
+            );
             return std::ptr::null_mut();
         }
     };
@@ -106,9 +107,49 @@ pub extern "system" fn spotify_search(
     vec_to_jstring_array(&mut env, uris)
 }
 
+#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getHomeFeed")]
+pub extern "system" fn get_home_feed(
+    mut env: JNIEnv,
+    _class: JClass,
+    expected: JString,
+    zone: JString,
+) -> jstring {
+    crate::jni_utils::guard("SpClient.getHomeFeed", std::ptr::null_mut(), || {
+        let result = (|| -> Result<String, librespot_core::Error> {
+            let expected: String = env
+                .get_string(&expected)
+                .map_err(librespot_core::Error::invalid_argument)?
+                .into();
+            let expected =
+                serde_json::from_str(&expected).map_err(librespot_core::Error::invalid_argument)?;
+            let zone: String = env
+                .get_string(&zone)
+                .map_err(librespot_core::Error::invalid_argument)?
+                .into();
+            let session = crate::session::with_session(Clone::clone)?;
+            let feed =
+                crate::network_rt().block_on(crate::home::fetch(&session, &expected, &zone))?;
+            serde_json::to_string(&feed).map_err(librespot_core::Error::internal)
+        })();
+        match result {
+            Ok(json) => env
+                .new_string(json)
+                .map(|s| s.into_raw())
+                .unwrap_or(std::ptr::null_mut()),
+            Err(error) => {
+                let _ = env.throw_new(
+                    "java/lang/IllegalStateException",
+                    format!("Cannot load home: {error}"),
+                );
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_saveItems")]
 pub extern "system" fn save_item(mut env: JNIEnv, _class: JClass, uris: JObjectArray) -> jboolean {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let length = env.get_array_length(&uris).unwrap();
     let mut rust_uris = Vec::with_capacity(length as usize);
@@ -146,7 +187,7 @@ pub extern "system" fn delete_items(
     _class: JClass,
     uris: JObjectArray,
 ) -> jboolean {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let length = env.get_array_length(&uris).unwrap();
     let mut rust_uris = Vec::with_capacity(length as usize);
@@ -184,7 +225,7 @@ pub extern "system" fn get_saved_items(
     _class: JClass,
     item_type: JString,
 ) -> jstring {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let rt = crate::network_rt();
 
@@ -206,7 +247,7 @@ pub extern "system" fn get_saved_items(
             error!("invalid SavedItemType: {e}");
             let _ = env.throw_new(
                 "java/lang/IllegalArgumentException",
-                "item_type must be 'tracks', 'albums', or 'shows'",
+                "item_type must be 'tracks', 'albums', 'artists', 'episodes', or 'shows'",
             );
             return std::ptr::null_mut();
         }
@@ -223,7 +264,7 @@ pub extern "system" fn get_saved_items(
         Err(e) => {
             error!("get_saved_uris failed: {e}");
             let _ = env.throw_new(
-                "java/io/RuntimeException",
+                "java/lang/RuntimeException",
                 format!("Spotify request failed: {e}"),
             );
             return std::ptr::null_mut();
@@ -239,9 +280,41 @@ pub extern "system" fn get_saved_items(
     }
 }
 
+#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_isFollowingUser")]
+pub extern "system" fn is_following_user(
+    mut env: JNIEnv,
+    _class: JClass,
+    uri: JString,
+) -> jboolean {
+    let uri: String = match env.get_string(&uri) {
+        Ok(value) => value.into(),
+        Err(error) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                format!("Invalid user URI: {error}"),
+            );
+            return 0;
+        }
+    };
+    let result = crate::network_rt().block_on(async {
+        let session = crate::session::with_session(Clone::clone)?;
+        crate::pathfinder::is_following(&session, &uri).await
+    });
+    match result {
+        Ok(following) => following as jboolean,
+        Err(error) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to read user follow state: {error}"),
+            );
+            0
+        }
+    }
+}
+
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getSavedEpisodeItems")]
 pub extern "system" fn get_saved_episode_items(mut env: JNIEnv, _class: JClass) -> jstring {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let rt = crate::network_rt();
 
@@ -261,7 +334,7 @@ pub extern "system" fn get_saved_episode_items(mut env: JNIEnv, _class: JClass) 
         Err(e) => {
             error!("get_saved_episode_items failed: {e}");
             let _ = env.throw_new(
-                "java/io/RuntimeException",
+                "java/lang/RuntimeException",
                 format!("Spotify request failed: {e}"),
             );
             return std::ptr::null_mut();
@@ -283,7 +356,7 @@ pub extern "system" fn get_episode_details(
     _class: JClass,
     episode_id: JString,
 ) -> jstring {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let rt = crate::network_rt();
 
@@ -305,7 +378,7 @@ pub extern "system" fn get_episode_details(
             Err(e) => {
                 error!("failed to serialize episode details: {e}");
                 let _ = env.throw_new(
-                    "java/io/RuntimeException",
+                    "java/lang/RuntimeException",
                     format!("Serialization failed: {e}"),
                 );
                 return std::ptr::null_mut();
@@ -315,7 +388,7 @@ pub extern "system" fn get_episode_details(
         Err(e) => {
             error!("get_episode_details failed: {e}");
             let _ = env.throw_new(
-                "java/io/RuntimeException",
+                "java/lang/RuntimeException",
                 format!("Spotify request failed: {e}"),
             );
             return std::ptr::null_mut();
@@ -331,71 +404,14 @@ pub extern "system" fn get_episode_details(
     }
 }
 
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getUserTop")]
-pub extern "system" fn get_user_top(
-    mut env: JNIEnv,
-    _class: JClass,
-    r#type: JString,
-    time_range: JString,
-) -> jstring {
-    let client = get_client();
-
-    let request_type: Option<String> = if r#type.is_null() {
-        None
-    } else {
-        match env.get_string(&r#type) {
-            Ok(t) => Some(t.into()),
-            Err(e) => {
-                error!("jni get_string failed for top request type: {e}");
-                return std::ptr::null_mut();
-            }
-        }
-    };
-
-    let time_range: String = match env.get_string(&time_range) {
-        Ok(t) => t.into(),
-        Err(e) => {
-            error!("jni get_string failed for top time range: {e}");
-            let _ = env.throw_new(
-                "java/lang/IllegalArgumentException",
-                format!("Invalid time_range: {}", e),
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    let rt = crate::network_rt();
-
-    let result = rt.block_on(async { client.get_top(request_type, time_range).await });
-
-    match result {
-        Ok(result) => match serde_json::to_string(&result) {
-            Ok(json) => match env.new_string(&json) {
-                Ok(r) => r.into_raw(),
-                Err(e) => {
-                    error!("jni new_string failed for top result: {e}");
-                    std::ptr::null_mut()
-                }
-            },
-            Err(e) => {
-                error!("serde for top result failed: {e}");
-                std::ptr::null_mut()
-            }
-        },
-        Err(e) => {
-            error!("get_user_top api call failed: {e}");
-            std::ptr::null_mut()
-        }
-    }
-}
-
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_transferPlaybackDevice")]
 pub extern "system" fn transfer_playback_device(
     mut env: JNIEnv,
     _class: JClass,
     device_id: JString,
+    expected_session: JString,
 ) -> jboolean {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let device_id: String = match env.get_string(&device_id) {
         Ok(t) => t.into(),
@@ -405,22 +421,48 @@ pub extern "system" fn transfer_playback_device(
         }
     };
 
+    let expected_session: String = match env.get_string(&expected_session) {
+        Ok(value) => value.into(),
+        Err(error) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                format!("Missing playback session identity: {error}"),
+            );
+            return 0;
+        }
+    };
+    let expected = match serde_json::from_str::<crate::collection_session::CollectionSession>(
+        &expected_session,
+    ) {
+        Ok(identity) => identity,
+        Err(error) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                format!("Invalid playback session identity: {error}"),
+            );
+            return 0;
+        }
+    };
     let rt = crate::network_rt();
 
-    let result = rt.block_on(async { client.transfer_playback(device_id).await });
+    let result = rt.block_on(async { client.transfer_playback(device_id, expected).await });
 
     match result {
         Ok(result) => result.is_success() as jboolean,
         Err(e) => {
             error!("transfer_playback api call failed: {e}");
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Connect transfer failed: {e}"),
+            );
             0
         }
     }
 }
 
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getDevices")]
-pub extern "system" fn get_devices(env: JNIEnv, _class: JClass) -> jstring {
-    let client = get_client();
+pub extern "system" fn get_devices(mut env: JNIEnv, _class: JClass) -> jstring {
+    let client = SpotifyClient::get();
 
     let rt = crate::network_rt();
 
@@ -441,38 +483,55 @@ pub extern "system" fn get_devices(env: JNIEnv, _class: JClass) -> jstring {
         },
         Err(e) => {
             error!("get_devices api call failed: {e}");
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Connect device lookup failed: {e}"),
+            );
             return std::ptr::null_mut();
         }
     }
 }
 
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_isOAuthAuthenticated")]
-pub extern "system" fn is_oauth_authenticated(_env: JNIEnv, _class: JClass) -> jboolean {
-    let client = get_client();
-
-    let rt = crate::network_rt();
-
-    let result = rt.block_on(async { client.is_oauth_authenticated().await });
-
-    result as jboolean
+#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getConnectPlayback")]
+pub extern "system" fn get_connect_playback(mut env: JNIEnv, _class: JClass) -> jstring {
+    let result = crate::spirc::playback_snapshot()
+        .and_then(|s| serde_json::to_string(&s).map_err(librespot_core::Error::internal));
+    match result {
+        Ok(json) => env
+            .new_string(json)
+            .map(|s| s.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            let _ = env.throw_new("java/lang/IllegalStateException", error.to_string());
+            std::ptr::null_mut()
+        }
+    }
 }
 
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getOAuthScope")]
-pub extern "system" fn get_oauth_scope(env: JNIEnv, _class: JClass) -> jstring {
-    let client = get_client();
-
-    let rt = crate::network_rt();
-
-    let result = rt.block_on(async { client.get_scope().await });
+#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_sendConnectCommand")]
+pub extern "system" fn send_connect_command(
+    mut env: JNIEnv,
+    _class: JClass,
+    raw: JString,
+) -> jboolean {
+    let result = (|| {
+        let raw: String = env
+            .get_string(&raw)
+            .map_err(librespot_core::Error::internal)?
+            .into();
+        let command =
+            serde_json::from_str(&raw).map_err(librespot_core::Error::invalid_argument)?;
+        crate::network_rt().block_on(crate::spirc::remote_command(command))
+    })();
     match result {
-        Some(scope) => match env.new_string(&scope) {
-            Ok(s) => s.into_raw(),
-            Err(e) => {
-                error!("jni new_string failed for oauth scope: {e}");
-                return std::ptr::null_mut();
-            }
-        },
-        None => std::ptr::null_mut(),
+        Ok(()) => 1,
+        Err(error) => {
+            let _ = env.throw_new(
+                "java/lang/IllegalStateException",
+                format!("Remote control failed: {error}. Check playback before retrying."),
+            );
+            0
+        }
     }
 }
 
@@ -483,7 +542,7 @@ pub extern "system" fn add_to_playlist(
     playlist_id: JString,
     uris: JObjectArray,
 ) -> jboolean {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let playlist_id: String = match env.get_string(&playlist_id) {
         Ok(p) => p.into(),
@@ -530,7 +589,7 @@ pub extern "system" fn delete_from_playlist(
     playlist_id: JString,
     uris: JObjectArray,
 ) -> jboolean {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let playlist_id: String = match env.get_string(&playlist_id) {
         Ok(p) => p.into(),
@@ -579,7 +638,7 @@ pub extern "system" fn create_playlist(
     public: jboolean,
     collaborative: jboolean,
 ) -> jstring {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let name: String = match env.get_string(&name) {
         Ok(n) => n.into(),
@@ -626,7 +685,7 @@ pub extern "system" fn modify_playlist(
     public: jboolean,
     collaborative: jboolean,
 ) -> jint {
-    let client = get_client();
+    let client = SpotifyClient::get();
 
     let playlist_id: String = match env.get_string(&playlist_id) {
         Ok(n) => n.into(),
@@ -850,35 +909,29 @@ pub extern "system" fn Java_cc_tomko_outify_core_SpClient_getRootlist(
 ) -> jobjectArray {
     let rt = crate::network_rt();
 
-    let uris: Vec<String> = rt.block_on(async {
-        match crate::spclient::get_rootlist().await {
-            Ok(bytes) => {
-                let mut uris = Vec::new();
-                let data = String::from_utf8_lossy(&bytes);
-                let pattern = Regex::new(r"spotify:playlist:[A-Za-z0-9]+").unwrap();
-
-                for mat in pattern.find_iter(&data) {
-                    uris.push(mat.as_str().to_string());
-                }
-
-                uris
-            }
-            Err(_) => Vec::new(),
-        }
+    let result = rt.block_on(async {
+        let bytes = crate::spclient::get_rootlist().await?;
+        let content =
+            librespot_protocol::playlist4_external::SelectedListContent::parse_from_bytes(&bytes)?;
+        Ok::<_, librespot_core::Error>(
+            content
+                .contents
+                .items
+                .iter()
+                .filter_map(|item| crate::playlist_api::playlist_uri(item.uri()).ok())
+                .collect::<Vec<_>>(),
+        )
     });
-
-    let string_class = env.find_class("java/lang/String").unwrap();
-    let array = env
-        .new_object_array(uris.len() as i32, string_class, JObject::null())
-        .unwrap();
-
-    for (i, uri) in uris.iter().enumerate() {
-        let jstr = env.new_string(uri).unwrap();
-        env.set_object_array_element(&array, i as i32, jstr)
-            .unwrap();
+    match result {
+        Ok(uris) => vec_to_jstring_array(&mut env, uris),
+        Err(error) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to read playlist library: {error}"),
+            );
+            std::ptr::null_mut()
+        }
     }
-
-    array.into_raw()
 }
 
 #[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_getRadioForTrack")]
@@ -995,65 +1048,6 @@ pub extern "system" fn get_lyrics_for_track(
     }
 }
 
-/// Starts the OAuth flow for SpotifyClient and returns the authorization URL
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_startOAuthFlow")]
-pub extern "system" fn start_oauth_flow(env: JNIEnv, _class: JClass) -> jstring {
-    let client = get_client();
-
-    let rt = crate::network_rt();
-
-    let auth_url_result = rt.block_on(async { client.start_oauth_flow().await });
-
-    let auth_url = match auth_url_result {
-        Ok(url) => url,
-        Err(e) => {
-            error!("start_oauth_flow api call failed: {e}");
-            return std::ptr::null_mut();
-        }
-    };
-
-    match env.new_string(auth_url) {
-        Ok(java_str) => java_str.into_raw(),
-        Err(e) => {
-            error!("jni new_string failed for oauth url: {e:?}");
-            std::ptr::null_mut()
-        }
-    }
-}
-
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_completeOAuthFlow")]
-pub extern "system" fn complete_oauth_flow(
-    mut env: JNIEnv,
-    _class: JClass,
-    code: JString,
-) -> jstring {
-    let client = get_client();
-
-    let code: String = match env.get_string(&code) {
-        Ok(js) => js.into(),
-        Err(e) => {
-            error!("jni get_string failed for oauth code: {e}");
-            return spclient_make_error_json(&env, "authentication", "Failed to read OAuth code");
-        }
-    };
-
-    let rt = crate::network_rt();
-
-    let result = rt.block_on(async { client.complete_oauth_flow(code).await });
-
-    match result {
-        Ok(_) => {
-            debug!("oauth flow completed via jni");
-            spclient_make_success_json(&env)
-        }
-        Err(e) => {
-            error!("complete_oauth_flow api call failed: {e}");
-            let err_type = classify_spclient_error(&e);
-            spclient_make_error_json(&env, err_type, &e.to_string())
-        }
-    }
-}
-
 fn spclient_make_error_json(env: &JNIEnv, error_type: &str, message: &str) -> jstring {
     let json = format!(
         r#"{{"error":{{"type":"{}","message":"{}"}}}}"#,
@@ -1089,20 +1083,13 @@ fn classify_spclient_error(err: &crate::spotify::error::SpotifyApiError) -> &'st
     }
 }
 
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_logout")]
-pub extern "system" fn logout(_env: JNIEnv, _class: JClass) -> jboolean {
-    let client = get_client();
-    match client.remove_token() {
-        Ok(_) => {
-            info!("spotify oauth token removed");
-            1
-        }
-        Err(_) => 0,
-    }
-}
+#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_isPlaybackAuthenticated")]
+pub extern "system" fn is_playback_authenticated(_env: JNIEnv, _class: JClass) -> jboolean {
+    let client = SpotifyClient::get();
 
-#[unsafe(export_name = "Java_cc_tomko_outify_core_SpClient_reset")]
-pub extern "system" fn reset(_env: JNIEnv, _class: JClass) -> jboolean {
-    crate::spotify::client::reset_client();
-    1
+    let rt = crate::network_rt();
+
+    let result = rt.block_on(async { client.is_playback_authenticated().await });
+
+    result as jboolean
 }

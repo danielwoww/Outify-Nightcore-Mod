@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="home_quick_picks">Quick picks</string>
+    <string name="home_picked_albums">Albums picked for you</string>
+    <string name="home_discovery_subtitle">Your music, a little discovery.</string>
+    <string name="home_connecting">Connecting to your music</string>
+    <string name="home_connecting_description">Waiting for your playback session. Recommendations do not need a separate Web API login.</string>
+    <string name="home_playback_login_description">Sign in for playback to see personalized albums, mixes, and quick picks.</string>
+    <string name="home_partial_feed">Some recommendations could not be loaded. Your available music is still here.</string>
+    <string name="home_feed_error">Recommendations could not be loaded. Try again in a moment.</string>
+    <string name="home_quick_picks_empty">Your recent music and a mix of saved tracks will appear here.</string>
+    <string name="home_feed_empty">Nothing here yet</string>
+    <string name="home_feed_empty_description">Listen to some music or save a few tracks, then refresh your home.</string>
+    <string name="home_source_description">Album recommendations and shelves come from Spotify. Quick picks combine recent items with a varied mix of your saved tracks.</string>
+    <string name="home_open_item">Open %1$s</string>
+    <string name="home_play_item">Play %1$s</string>
+    <string name="home_kind_album">Album</string>
+    <string name="home_kind_playlist">Playlist</string>
+    <string name="home_kind_artist">Artist</string>
+    <string name="home_kind_track">Track</string>
+    <string name="devices_remote_volume">Volume on %1$s</string>
+    <string name="devices_playback_not_ready">Device discovery needs a ready playback login. Sign in for playback or wait for reconnection.</string>
+    <string name="devices_loading">Waiting for Spotify Connect devices…</string>
     <string name="app_name" translatable="false">Outify</string>
     <string name="title_activity_auth" translatable="false">AuthActivity</string>
     <string name="title_activity_main" translatable="false">Outify</string>
@@ -281,13 +302,13 @@
     <string name="onb_view_content">View artists, albums and playlists</string>
     <string name="onb_keep_synced">Keep your listening synced</string>
     <string name="onb_playback_connected">Playback login connected</string>
-    <string name="onb_account_login_desc">A Spotify Premium subscription is required. Connect your Spotify account to unlock library, playlists, likes and recommendations. This is handled securely via OAuth.</string>
+    <string name="onb_account_login_desc">A Spotify Premium subscription is required for playback. Optional account login enables personal top artists and tracks. Search, library, playlist and social actions use your playback login.</string>
     <string name="onb_like_tracks">Like and unlike tracks, albums and artists</string>
     <string name="onb_manage_playlists">Create and manage your playlists</string>
     <string name="onb_account_connected">Account connected</string>
     <string name="onb_why_two">Why two logins?</string>
     <string name="onb_librespot_desc">Outify uses librespot to stream audio. librespot authenticates with Spotify\'s streaming protocol using anonymous credentials — it operates independently of your Spotify account and cannot access your personal data.</string>
-    <string name="onb_oauth_desc">Your Spotify account login is separate and handled via OAuth. It grants access to your library, playlists, and social features — but is not involved in audio streaming.</string>
+    <string name="onb_oauth_desc">This optional OAuth login enables personal top artists and tracks. Search, streaming, library, playlist and social features use your playback login instead.</string>
     <string name="onb_premium_required">Spotify Premium required</string>
     <string name="onb_premium_learn">Outify only works with a Spotify Premium account. Tap to learn why.</string>
     <string name="onb_required_streaming">Required for audio streaming.</string>
@@ -374,7 +395,7 @@
     <string name="settings_lyrics_fallback_desc">When Spotify has no lyrics, look for synced lyrics on lrclib.net. Sends the track title, artist, album and duration to LRCLIB.</string>
     <string name="settings_connect_desc">Make Outify the active device to stream from</string>
     <string name="settings_playback_login_desc">This login is mandatory to allow for playback. It uses fake Spotify credentials to stream audio.</string>
-    <string name="settings_account_login_desc">This login allows for manipulation of your Spotify account: liking tracks, creating playlists, accessing recommendations, and managing your library.</string>
+    <string name="settings_account_login_desc">This optional login enables personal top artists and tracks. Search, library, playlist, podcast and user-follow operations use your playback login.</string>
     <string name="settings_librespot_creds">librespot · anonymous streaming credentials</string>
     <string name="settings_oauth_creds">Your Spotify account · OAuth</string>
     <string name="settings_connect_name">Spotify Connect name</string>
@@ -427,7 +448,6 @@
     <string name="settings_premium_playback">Spotify Premium required for playback</string>
     <string name="account_login_in_progress">You should be in login process now..</string>
     <string name="toast_librespot_failed">Failed to load librespot!</string>
-    <string name="toast_no_creds">No Spotify credentials were supplied during build</string>
     <string name="toast_login_success">Login successful!</string>
     <string name="toast_login_failed">Login failed</string>
     <string name="toast_added_to_queue">Added to queue</string>

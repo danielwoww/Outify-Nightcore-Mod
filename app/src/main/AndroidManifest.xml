@@ -99,10 +99,6 @@
                 <data android:host="auth_complete" />
                 <data android:host="auth_failed" />
 
-                <!-- Account OAuth callback -->
-                <data android:host="account_auth_complete" />
-                <data android:host="account_auth_failed" />
-
                 <!-- Opening spotify URLs -->
                 <data android:scheme="spotify" />
 
@@ -110,6 +106,21 @@
                 <data
                     android:host="open.spotify.com"
                     android:scheme="https" />
+            </intent-filter>
+
+            <!-- Spotify short links (e.g. Jam invitations) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="spotify.link"
+                    android:scheme="https" />
+                <data
+                    android:host="spotify.link"
+                    android:scheme="http" />
             </intent-filter>
 
             <intent-filter>

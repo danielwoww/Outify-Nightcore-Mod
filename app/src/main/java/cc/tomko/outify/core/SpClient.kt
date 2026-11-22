@@ -17,10 +17,11 @@ class SpClient @Inject constructor() {
 
         const val TRACKS = "tracks"
         const val ALBUMS = "albums"
+        const val ARTISTS = "artists"
         const val EPISODES = "episodes"
         const val SHOWS = "shows"
 
-        @StringDef(TRACKS, ALBUMS, EPISODES, SHOWS)
+        @StringDef(TRACKS, ALBUMS, ARTISTS, EPISODES, SHOWS)
         @Retention(AnnotationRetention.SOURCE)
         annotation class SavedItemType
     }
@@ -31,12 +32,12 @@ class SpClient @Inject constructor() {
      */
     external fun username(): String?
 
-    external fun getCurrentUserProfile(): String?
+    /** Pathfinder catalog search using playback login; offset and limit apply to each requested type. */
     external fun search(
         query: String,
         type: String,
         offset: Int = -1,
-        pages: Int = -1
+        limit: Int = -1
     ): Array<String>
 
     external fun searchContext(
@@ -47,6 +48,8 @@ class SpClient @Inject constructor() {
     external fun getUserCollection(query: String? = null): String?
     external fun getSavedTrackCollection(): String?
     external fun getCollectionSession(): String?
+    /** Personalized music home using playback login, bound to the displayed session. */
+    external fun getHomeFeed(expectedSession: String, timeZone: String): String?
 
     /**
      * Adds given uris to users library
@@ -55,11 +58,16 @@ class SpClient @Inject constructor() {
 
     /**
      * Removes given uris from users library
+     * Uses playback login; never falls back to the separate OAuth account.
      */
     external fun deleteItems(uris: Array<String>): Boolean
 
+    /** Reads user-follow state using playback authentication. Throws on failed reads. */
+    external fun isFollowingUser(userUri: String): Boolean
+
     /**
      * Get uris of items saved in users library
+     * Fetches every page using playback authentication.
      */
     external fun getSavedItems(@SavedItemType itemType: String = TRACKS): String
 
@@ -70,24 +78,20 @@ class SpClient @Inject constructor() {
     external fun getSavedEpisodeItems(): String
 
     /**
-     * Get episode details (show URI, resume point, etc.) via the Spotify Web API.
+     * Get episode details (show URI, resume point, etc.) via playback-authenticated Pathfinder.
      * Returns JSON with showUri, fullyPlayed, resumePositionMs.
      */
     external fun getEpisodeDetails(episodeId: String): String
 
     /**
-     * Get the current user's top artists or tracks based on calculated affinity.
-     * Default type = artists
-     * Possible types: artists, tracks
-     * https://developer.spotify.com/documentation/web-api/reference/get-users-top-artists-and-tracks
-     */
-    external fun getUserTop(type: String? = null, timeRange: String = "medium_range"): String?
-
-    /**
      * Gets the available devices to stream playback from.
+     * Reads the existing Spotify Connect roster.
      * In format of [cc.tomko.outify.core.model.DevicesResponse]
      */
     external fun getDevices(): String?
+
+    external fun getConnectPlayback(): String?
+    external fun sendConnectCommand(commandJson: String): Boolean
 
     /**
      * Gets the count of available devices to stream playback from.
@@ -96,34 +100,37 @@ class SpClient @Inject constructor() {
         getDevices()?.let { Json.decodeFromString<DevicesResponse>(it).devices.size } ?: 0
 
     /**
-     * Transfers current playback device to the one with given ID
+     * Transfers playback through Connect, preserving paused state.
+     * expectedSession is the serialized playback identity displayed by the picker.
      */
-    external fun transferPlaybackDevice(deviceId: String): Boolean
+    external fun transferPlaybackDevice(deviceId: String, expectedSession: String): Boolean
 
     /**
-     * Check if user has authenticated with Spotify via OAuth.
+     * Check if user has authenticated via playback (librespot session).
      * Returns true if authenticated, false otherwise.
      */
-    external fun isOAuthAuthenticated(): Boolean
+    external fun isPlaybackAuthenticated(): Boolean
 
     /**
-     * Returns oauth scopes (if any) separated by space
-     * May throw exception when error occurs
+     * Gets the current user profile via playback authentication (Mercury).
      */
-    external fun getOAuthScope(): String?
+    external fun getCurrentUserProfile(): String?
 
     /**
      * Adds tracks in array into the playlist by given id
+     * Uses playback login and appends tracks/episodes in caller order.
      */
     external fun addToPlaylist(playlist_id: String, track_uris: Array<String>): Boolean
 
     /**
      * Removes tracks in array from the playlist by given id
+     * Uses playback login and removes all matching occurrences.
      */
     external fun deleteFromPlaylist(playlist_id: String, track_uris: Array<String>): Boolean
 
     /**
      * Creates new playlist.
+     * Uses playback login.
      * For it to be collaborative, public has to be false
      *
      * Returns ID of the new playlist
@@ -137,6 +144,7 @@ class SpClient @Inject constructor() {
 
     /**
      * Modifies playlist
+     * Uses playback login.
      * For it to be collaborative, public has to be false
      *
      * Returns status code
@@ -165,31 +173,6 @@ class SpClient @Inject constructor() {
      * Returns lyrics for track id
      */
     external fun getLyrics(trackId: String): String?
-
-    /**
-     * Starts the OAuth flow for SpotifyClient user authentication.
-     * Returns the authorization URL to be opened in a webview.
-     */
-    external fun startOAuthFlow(): String
-
-    /**
-     * Completes the OAuth flow by exchanging the authorization code for tokens.
-     * Call this after the user completes authorization.
-     * Returns JSON: {"success":true} on success, {"error":{"type":"...","message":"..."}} on failure.
-     */
-    external fun completeOAuthFlow(code: String): String
-
-    /**
-     * Deletes the credentials file for Spotify Client
-     */
-    external fun logout(): Boolean
-
-    /**
-     * Resets the Spotify Client's transient OAuth state.
-     * Call after logging in so the client reloads the fresh credentials on the
-     * next request.
-     */
-    external fun reset(): Boolean
 
     fun checkAndHandleError(result: String, context: String = ""): String {
         if (result.startsWith("{")) {

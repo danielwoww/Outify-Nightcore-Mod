@@ -568,6 +568,85 @@ fn is_current_runtime(expected: &Arc<Spirc>, generation: u64) -> bool {
         .unwrap_or(false)
 }
 
+fn device_runtime(
+    expected: Option<&crate::collection_session::CollectionSession>,
+) -> Result<(Arc<Spirc>, u64, crate::collection_session::CollectionSession), librespot_core::Error> {
+    if SpircState::from_u8(STATE.load(Ordering::Acquire)) != SpircState::Ready {
+        return Err(librespot_core::Error::unavailable("Connect runtime is not ready"));
+    }
+    let (spirc, generation) = with_spirc(|runtime| (runtime.spirc.clone(), runtime.generation))
+        .map_err(librespot_core::Error::unavailable)?;
+    let identity = crate::collection_session::identity(spirc.session())?;
+    crate::collection_session::ensure_current(&identity)?;
+    if expected.is_some_and(|expected| expected != &identity) {
+        return Err(librespot_core::Error::unavailable("Playback session was replaced before Connect request"));
+    }
+    Ok((spirc, generation, identity))
+}
+
+pub async fn devices() -> Result<crate::types::responses::DevicesResponse, librespot_core::Error> {
+    let (spirc, generation, identity) = device_runtime(None)?;
+    let roster = tokio::time::timeout(Duration::from_secs(10), spirc.connect_devices()).await
+        .map_err(|_| librespot_core::Error::deadline_exceeded("Connect devices are not ready"))??;
+    crate::collection_session::ensure_current(&identity)?;
+    if !is_current_runtime(&spirc, generation)
+        || SpircState::from_u8(STATE.load(Ordering::Acquire)) != SpircState::Ready {
+        return Err(librespot_core::Error::unavailable("Connect runtime was replaced"));
+    }
+    Ok(crate::connect_devices::response(roster, spirc.session().device_id().to_owned(), identity))
+}
+
+/// A read of the existing cache, never a second registration or HTTP request.
+pub fn playback_snapshot() -> Result<crate::remote_playback::Snapshot, librespot_core::Error> {
+    let (spirc, generation, identity) = device_runtime(None)?;
+    let roster = spirc.current_connect_devices()?;
+    crate::collection_session::ensure_current(&identity)?;
+    if !is_current_runtime(&spirc, generation) {
+        return Err(librespot_core::Error::unavailable("Connect runtime was replaced"));
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(librespot_core::Error::internal)?.as_millis() as i64;
+    Ok(crate::remote_playback::snapshot(&roster, spirc.session().device_id().to_owned(),
+        identity, generation, now, spirc.session().time_delta().saturating_mul(1000)))
+}
+
+pub async fn remote_command(command: crate::remote_playback::Command) -> Result<(), librespot_core::Error> {
+    let (spirc, generation, identity) = device_runtime(Some(&command.target.session))?;
+    let guard = || {
+        if generation != command.target.runtime || !is_current_runtime(&spirc, generation)
+            || SpircState::from_u8(STATE.load(Ordering::Acquire)) != SpircState::Ready {
+            return Err(librespot_core::Error::unavailable("Connect runtime was replaced"));
+        }
+        crate::remote_playback::validate(&spirc.current_connect_devices()?, &command, spirc.session().device_id())
+    };
+    guard()?;
+    let (method, endpoint, body) = crate::remote_playback::wire(&command, spirc.session().device_id())?;
+    crate::native_request::request_guarded(spirc.session(), &identity, method, &endpoint,
+        "application/json", &body, true, guard).await?;
+    Ok(())
+}
+
+/// Explicit selection is bound to the playback account the device picker displayed.
+pub async fn transfer_device(
+    device_id: String,
+    expected: crate::collection_session::CollectionSession,
+) -> Result<(), librespot_core::Error> {
+    let (spirc, generation, identity) = device_runtime(Some(&expected))?;
+    let checked = spirc.clone();
+    let expected_guard = identity.clone();
+    tokio::time::timeout(Duration::from_secs(30), spirc.transfer_to(device_id, move || {
+        is_current_runtime(&checked, generation)
+            && SpircState::from_u8(STATE.load(Ordering::Acquire)) == SpircState::Ready
+            && crate::collection_session::ensure_current(&expected_guard).is_ok()
+    })).await.map_err(|_| librespot_core::Error::deadline_exceeded("Connect transfer timed out; check the current device before retrying"))??;
+    crate::collection_session::ensure_current(&identity)?;
+    if !is_current_runtime(&spirc, generation)
+        || SpircState::from_u8(STATE.load(Ordering::Acquire)) != SpircState::Ready {
+        return Err(librespot_core::Error::unavailable("Connect runtime was replaced during transfer"));
+    }
+    Ok(())
+}
+
 /// Records that a playback command was handed to the Connect task.
 fn arm_command_ack(generation: u64, label: &'static str) {
     let now = Instant::now();
@@ -614,6 +693,7 @@ fn handle_event(event: PlayerEvent) {
             position_ms,
         } => {
             clear_command_ack();
+            notify_buffer_state("stopped");
             if !PLAYBACK_INTENT.can_play() {
                 // Commands queued before a pause (or a transfer during rebuild) can
                 // still emit Playing. Stop the decoder as well as Android output.
@@ -644,6 +724,7 @@ fn handle_event(event: PlayerEvent) {
             clear_command_ack();
             IS_PLAYING.store(false, std::sync::atomic::Ordering::Relaxed);
             LAST_POSITION.store(position_ms, std::sync::atomic::Ordering::Relaxed);
+            notify_buffer_state("stopped");
 
             update_current_track(track_id.clone());
 
@@ -677,6 +758,7 @@ fn handle_event(event: PlayerEvent) {
         PlayerEvent::Stopped { .. } => {
             clear_command_ack();
             IS_PLAYING.store(false, Ordering::Relaxed);
+            notify_buffer_state("stopped");
             crate::jni_utils::playback::on_player_status(false);
         }
         PlayerEvent::TimeToPreloadNextTrack {

@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -63,13 +64,13 @@ class PlayerViewModel @Inject constructor(
             playbackStateHolder.estimatePosition().inWholeMilliseconds
         )
 
-    val isShuffling = settingsRepository.shuffleEnabled
+    val isShuffling = playbackStateHolder.state.map { it.shuffleEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val romanizeLyrics: StateFlow<Boolean> = settingsRepository.romanizeLyrics
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    val repeatMode: Flow<RepeatMode> = settingsRepository.repeatMode
+    val repeatMode: Flow<RepeatMode> = playbackStateHolder.state.map { it.repeatMode }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val isLiked: StateFlow<Boolean> =
@@ -101,8 +102,9 @@ class PlayerViewModel @Inject constructor(
     }
 
     val uiState: StateFlow<PlayerUIState> =
-        playbackStateHolder.state
-            .map { state ->
+        // The speed slider controls this device's Nightcore speed, so it shows the local
+        // speed even while another Connect device (with its own speed) owns playback.
+        combine(playbackStateHolder.state, playbackStateHolder.localSpeed) { state, localSpeed ->
                 val audio = state.currentAudio
                 val position = state.position
                 PlayerUIState(
@@ -111,7 +113,7 @@ class PlayerViewModel @Inject constructor(
                     albumArt = audio?.getCover(CoverSize.LARGE)?.uri,
                     isPlaying = state.isPlaying,
                     isExplicit = audio?.explicit ?: false,
-                    playbackSpeed = state.playbackSpeed,
+                    playbackSpeed = localSpeed,
                     totalLengthMs = audio?.duration ?: 0L,
                     positionMs = position.active.inWholeMilliseconds,
                     lastUpdateTime = position.lastSync,
@@ -132,19 +134,16 @@ class PlayerViewModel @Inject constructor(
                 PlayerAction.Next -> spirc.playerNext()
                 PlayerAction.Previous -> {
                     spirc.playerPrevious()
-                    viewModelScope.launch {
-                        playbackStateHolder.seekTo(Duration.ZERO)
-                    }
                 }
 
                 is PlayerAction.SeekTo -> {
                     viewModelScope.launch {
-                        playbackStateHolder.seekTo(action.position.toDuration(DurationUnit.MILLISECONDS))
                         spirc.seekTo(action.position)
                     }
                 }
 
                 PlayerAction.RepeatToggle -> {
+                    if (!playbackStateHolder.localPlaybackAllowed) return@launch
                     val current = settingsRepository.repeatMode.first()
                     val next = current.next()
                     viewModelScope.launch {
@@ -155,6 +154,7 @@ class PlayerViewModel @Inject constructor(
                 }
 
                 PlayerAction.ShuffleToggle -> {
+                    if (!playbackStateHolder.localPlaybackAllowed) return@launch
                     val newValue = !isShuffling.value
                     viewModelScope.launch {
                         settingsRepository.setShuffle(newValue)
