@@ -13,6 +13,8 @@
   <p>
     <a href="https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest"><strong>Download the latest APK</strong></a>
     ·
+    <a href="https://github.com/danielwoww/Outify-Nightcore-Mod/issues/new/choose">Report a problem</a>
+    ·
     <a href="./docs/NIGHTCORE-MOD.md">Technical details</a>
   </p>
 </div>
@@ -56,7 +58,7 @@ See [docs/NIGHTCORE-MOD.md](./docs/NIGHTCORE-MOD.md) for build and release instr
 
 ## Credits
 
-- [iTomKo/Outify](https://github.com/iTomKo/Outify) by TomKo, the app this fork is built on. Please don't report problems that only happen in this mod to the Outify project.
+- [iTomKo/Outify](https://github.com/iTomKo/Outify) by TomKo, the app this fork is built on. Please report problems with this mod [here](https://github.com/danielwoww/Outify-Nightcore-Mod/issues/new/choose), not to the Outify project.
 - [librespot](https://github.com/librespot-org/librespot) for the Spotify streaming backend
 - Outify's translators on [Weblate](https://translate.codeberg.org/engage/outify/)
 

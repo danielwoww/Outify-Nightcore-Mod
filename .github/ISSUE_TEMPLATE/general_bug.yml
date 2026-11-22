@@ -1,12 +1,12 @@
 name: General Bug
-description: Report a general bug with Outify
+description: Report a general bug with Outify Nightcore Mod
 title: "[Bug]: "
 labels: ['bug']
 body:
     - type: markdown
       attributes:
           value: |
-              Thanks for taking the time to fill out this bug report! If this is a security issue, please report it to TomKo directly.
+              Thanks for taking the time to fill out this bug report! This tracker is for Outify Nightcore Mod; problems that also happen in the official Outify app belong at https://github.com/iTomKo/Outify/issues. If this is a security issue, don't post it here, contact @danielwoww privately instead.
 
     - type: textarea
       attributes:
@@ -49,8 +49,8 @@ body:
     - type: checkboxes
       id: existing
       attributes:
-          label: Please confirm that you are using Outify with Spotify Premium account
-          description: As stated in project's README, Outify requires Spotify Premium to work.
+          label: Please confirm that you are using a Spotify Premium account
+          description: As stated in the README, the app requires Spotify Premium to work.
           options:
               - label: 'Yes'
                 required: true
