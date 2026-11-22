@@ -1,7 +1,7 @@
 # Outify Nightcore Mod
 
 A fork of [iTomKo/Outify](https://github.com/iTomKo/Outify) (currently based on **Outify
-2.0.0**) that adds nightcore-style playback speed, plus a set of playback fixes.
+2.1.0**) that adds nightcore-style playback speed, plus a set of playback fixes.
 
 <p align="center">
   <img src="images/nightcore-player.jpg" alt="Player with the speed slider on the album art" width="300">
@@ -34,9 +34,12 @@ Like Outify, this mod requires **Spotify Premium**.
 - **Speed slider:** an always-visible 0.5x – 3x slider on the album art. It snaps to 0.05
   steps, the speed changes live while dragging, and tapping the speed label resets to 1x.
 - **Speed is remembered** across app restarts and updates.
-- **Outify is the default playback device:** tapping a song, or pressing play / next /
-  previous / seek, plays on this phone, even if another Spotify device is still listed as
-  active. Just opening the app does not take playback away from another device.
+- **Reliable playback on this phone:** when Outify is the playback device, song taps and
+  play / next / previous / seek are never silently dropped because librespot still thinks
+  another device is active. While another device (PC, speaker) is actually playing, Outify
+  controls that device instead (upstream's Connect remote control, since 2.1.0). Nightcore
+  speed only applies to audio played on this phone, so pick Outify under *Playback devices*
+  to play here. The speed slider always shows this phone's speed.
 - **Playback stability fixes:** no more random stops, no ANR kill while waiting for
   playback, and no dropouts at high speeds. See below.
 
@@ -67,9 +70,12 @@ album art permanently, so it no longer needs a tap on the cover to appear.
 The speed is stored in DataStore (`playback_speed` in `SettingsRepository`). `Player`
 restores it on startup without overwriting a speed the user already changed while it
 loaded. It saves changes debounced, so dragging the slider writes once when it settles.
-`PlaybackStateHolder.reset()` keeps the speed.
+Since upstream 2.1.0 rebuilds `PlaybackState` whenever Connect ownership changes, the speed
+lives in its own `PlaybackStateHolder.localSpeed` flow. Every state not owned by a remote
+device gets that speed, `AudioEngine` and the persistence read it directly, and a remote
+device's speed is never saved over it.
 
-### Outify is the default playback device
+### Reliable playback on this phone
 librespot ignores every command except Activate/Transfer while another Spotify Connect
 device (PC, speaker, web player) is the active device:
 
@@ -86,6 +92,9 @@ devices*. In `core/spirc/SpircWrapper.kt`:
 - `takeOverIfInactive()` transfers the Connect session (track, queue, position) here before
   play / next / previous / seek. Without it those commands were ignored, and the native
   command watchdog restarted the whole runtime after 30 s, interrupting playback.
+- Since upstream 2.1.0 both only run on the local branch: when the Connect state says
+  another device owns playback, upstream's `routeRemote()` / `dispatchPlaybackLoad()` send
+  the command to that device instead, and never fall back to taking over.
 
 ### Fix: ANR kill while waiting for playback
 `PlaybackService` used to be started with `startForegroundService()`. Media3 only calls
@@ -211,7 +220,7 @@ can't update it in place, so the app must be uninstalled first.
 ever misused, rotate the secret in the Spotify developer dashboard and rebuild.
 
 ### 7. Publishing a release
-Tags follow `v<upstream version>-nightcore.<n>`, e.g. `v2.0.0-nightcore.1`.
+Tags follow `v<upstream version>-nightcore.<n>`, e.g. `v2.1.0-nightcore.1`.
 ```bash
 git tag -a v2.0.0-nightcore.2 -m "..." && git push origin v2.0.0-nightcore.2
 gh release create v2.0.0-nightcore.2 --title "..." --notes-file notes.md <apks> SHA256SUMS.txt
@@ -224,7 +233,10 @@ git fetch --no-recurse-submodules upstream
 git merge upstream/master
 git submodule update --init rust/deps/librespot
 ```
-Then rebuild the native library (step 3) and the APK. Files to check when upstream changes
+Then rebuild the native library (step 3) and the APK. If the librespot commit upstream
+points at isn't public yet (this happened with 2.1.0), take `liblibrespot_ffi.so` for both
+ABIs from the `lib/` folder of upstream's official release APK for the same tag. This fork
+doesn't change any Rust code, so that library matches exactly. Files to check when upstream changes
 them: `playback/AudioEngine.kt`, `playback/Player.kt`, `core/spirc/SpircWrapper.kt`,
 `services/PlaybackService.kt` and `ui/screens/player/PlaybackSpeedControl.kt`.
 

@@ -41,12 +41,12 @@
 ### Outify Nightcore Mod
 <img src="docs/images/nightcore-player.jpg" alt="Player with the speed slider on the album art" width="220" align="right">
 
-This is a fork of [iTomKo/Outify](https://github.com/iTomKo/Outify), currently based on **Outify 2.0.0**. It changes the following:
+This is a fork of [iTomKo/Outify](https://github.com/iTomKo/Outify), currently based on **Outify 2.1.0**. It changes the following:
 
 - **Nightcore playback speed**: speed changes tempo *and* pitch together, like speeding up a record, instead of pitch-preserving time-stretch
 - **Speed slider**: an always-visible 0.5x – 3x slider on the album art (tap the label to reset to 1x)
 - **Speed is remembered** across app restarts
-- **Outify is the default playback device**: tapping a song, or pressing play / next / previous / seek, plays on this phone, even if another Spotify device is still listed as active
+- **Reliable playback on this phone**: when Outify is the playback device, tapping a song or pressing play / next / previous / seek no longer gets silently ignored because of a stale "active device". While another device is playing, Outify controls that device (upstream 2.1.0 remote control); pick Outify under *Playback devices* to play here with Nightcore speed
 - **Playback stability fixes**: no random stops from an audio-focus conflict, no ANR kill while waiting for playback, and no dropouts at high speeds
 
 **[Download the latest release](https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest)**. It uses its own signing key, so uninstall the official Outify app first.
