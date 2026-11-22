@@ -1,130 +1,65 @@
-<!-- markdownlint-disable -->
-> [!WARNING]
-> Starting from **September 1st 2026** old Spotify credentials will be revoked. Users on version **< 1.8.0** will no longer be able to stream audio.
-> To keep streaming audio, update the app and follow [guides](https://github.com/iTomKo/Outify/blob/master/docs/MIGRATING.md).
-
 <div align="center">
-  <a href="https://github.com/iTomKo/Outify">
-    <img src="./.github/logo.svg" alt="Outify" width="150">
-  </a>
-  <h1 align="center">
-    Outify
-  </h1>
+  <img src="./.github/logo.svg" alt="Outify Nightcore Mod" width="150">
+  <h1>Outify Nightcore Mod</h1>
   <p>
-    <br />
-    <strong>
-      Implementation of 
-      <a href="https://github.com/librespot-org/librespot/">librespot</a>
-      for Spotify streaming 
-    </strong>
+    <strong>Spotify on Android with nightcore-style playback speed</strong><br />
+    A fork of <a href="https://github.com/iTomKo/Outify">Outify</a>, the open source Material 3 Spotify client built on <a href="https://github.com/librespot-org/librespot">librespot</a>
   </p>
 
+  [![Latest release](https://img.shields.io/github/v/release/danielwoww/Outify-Nightcore-Mod?style=for-the-badge&label=release)](https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest)
+  [![Downloads](https://img.shields.io/github/downloads/danielwoww/Outify-Nightcore-Mod/total?style=for-the-badge)](https://github.com/danielwoww/Outify-Nightcore-Mod/releases)
+  [![License](https://img.shields.io/github/license/danielwoww/Outify-Nightcore-Mod?style=for-the-badge)](./LICENSE)
+
   <p>
-    <a href="https://github.com/iTomKo/Outify/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml">Report Bug</a>
+    <a href="https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest"><strong>Download the latest APK</strong></a>
     ·
-    <a href="https://github.com/iTomKo/Outify/issues/new?template=feature_request.md">Request Feature</a>
-    ·
-    <a href="https://github.com/iTomKo/Outify/discussions/new?category=q-a">Ask Question</a>
+    <a href="./docs/NIGHTCORE-MOD.md">Technical details</a>
   </p>
-
-  <br />
-
-  ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?&style=for-the-badge&logo=kotlin&logoColor=white)
-  ![Android](https://img.shields.io/badge/Android-34A853?style=for-the-badge&logo=android&logoColor=white)
-  ![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
-
-  [![GitHub License](https://img.shields.io/github/license/iTomKo/Outify?style=for-the-badge&label=%20)](https://www.gnu.org/licenses/gpl-3.0)
-  [![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/iTomKo/Outify?style=for-the-badge)](https://github.com/iTomKo/Outify/issues)
-  [![Weblate project translated](https://img.shields.io/weblate/progress/outify?server=https%3A%2F%2Ftranslate.codeberg.org&style=for-the-badge)](https://translate.codeberg.org/engage/outify/)
 </div>
 
-### Outify Nightcore Mod
-<img src="docs/images/nightcore-player.jpg" alt="Player with the speed slider on the album art" width="220" align="right">
-
-This is a fork of [iTomKo/Outify](https://github.com/iTomKo/Outify), currently based on **Outify 2.1.0**. It changes the following:
-
-- **Nightcore playback speed**: speed changes tempo *and* pitch together, like speeding up a record, instead of pitch-preserving time-stretch
-- **Speed slider**: an always-visible 0.5x – 3x slider on the album art (tap the label to reset to 1x)
-- **Speed is remembered** across app restarts
-- **Reliable playback on this phone**: when Outify is the playback device, tapping a song or pressing play / next / previous / seek no longer gets silently ignored because of a stale "active device". While another device is playing, Outify controls that device (upstream 2.1.0 remote control); pick Outify under *Playback devices* to play here with Nightcore speed
-- **Playback stability fixes**: no random stops from an audio-focus conflict, no ANR kill while waiting for playback, and no dropouts at high speeds
-
-**[Download the latest release](https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest)**. It uses its own signing key, so uninstall the official Outify app first.
-
-See [docs/NIGHTCORE-MOD.md](./docs/NIGHTCORE-MOD.md) for details, build and release instructions, and how to merge upstream updates. The links in the header and below go to the original Outify project. Please don't report problems that only happen in this mod there.
-
-<br clear="right"/>
-
-### Information
-Third party open source Android Spotify client with Material 3 using librespot Rust
-
-> [!WARNING]
-> Outify is still in early development.
-> Any contributions are welcomed.
-
-> [!NOTE]
-> Outify requires premium Spotify account!
-> No support will be provided for non-premium users.
-
-### Features
-Outify is based on librespot backend allowing us to stream Spotify audio.
-
-- Searching Spotify
-- Streaming S16 audio
-- Viewing playlists, albums, artists, your library
-- Sleek Material 3 design
-- Dynamic Material Theme
-
-### Contributing
-Please take a look at [CONTRIBUTING.md](https://github.com/iTomKo/Outify/blob/master/docs/CONTRIBUTING.md)
-
-### Help & Support
-Contact us through Github:
-- via [issues](https://github.com/iTomKo/Outify/issues) for reports, feature requests, bug reports, ..
-- via [discussions](https://github.com/iTomKo/Outify/discussions) for help with the application.
-
-### Roadmap
-- [x] raw PCM streaming
-- [x] adding to queue
-- [x] starting radio
-- [x] playlist support
-    - [x] playing and viewing playlist
-    - [x] modifying playlist
-- [x] interacting with spotify account
-    - [x] login to Spotify Web API
-- [ ] jams
-    - [x] starting, ending and inviting
-    - [ ] joining jams
-- [ ] offline support
-- [x] media notification
-- [x] keep alive lifecycle
-
-### Screenshots
-<p>
-    <img src="docs/images/playerscreen.png" alt="Player interface" width="200" hspace="10"/>
-    <img src="docs/images/lyrics.png" alt="Player interface" width="200" hspace="10"/>
-    <img src="docs/images/artist.png" alt="Artist view" width="200" hspace="10"/>
-    <img src="docs/images/liked.png" alt="Liked view" width="200" hspace="10"/>
+<p align="center">
+  <img src="docs/images/nightcore-player.jpg" alt="Player with the speed slider on the album art" width="280">
 </p>
 
-[View entire gallery](./docs/images/)
+## Features
 
-### Translation
-We use Weblate to translate *Outify*. For more details or to submit translations, visit our [Weblate page](https://translate.codeberg.org/engage/outify/).
-[![Translation status](https://translate.codeberg.org/widget/outify/multi-auto.svg)](https://translate.codeberg.org/engage/outify/)
+- **Nightcore playback speed**: speeding up raises tempo *and* pitch together, like speeding up a record. Slowing down lowers the pitch the same way.
+- **Speed slider on the album art**: always visible, from 0.5x to 3x in 0.05 steps. The speed changes live while you drag. Tap the label to reset to 1x.
+- **Speed is remembered** across restarts, track changes and app updates.
+- **Clean audio at high speed**: playback is resampled by Android's own audio pipeline, with no dropouts or clicks even at 3x.
+- **Reliable playback**: song taps and play / next / previous / seek are never silently ignored because Spotify thinks another device is still active. The app also no longer gets killed while waiting for playback to start.
 
-### Attribution
-[librespot-org/librespot](https://github.com/librespot-org/librespot) for providing the required backend
+Everything else from Outify is included and kept up to date: search, playlists, albums, artists and your library, lyrics, queue and radio, Spotify Connect remote control, Jams, a media notification and a dynamic Material 3 theme.
 
-[PixelPlay](https://github.com/theovilardo/PixelPlayer/) for UI, UX inspiration
+## Install
 
-[OuterTune](https://github/OuterTune/OuterTune) for UI, UX inspiration
+1. Download the APK from the [latest release](https://github.com/danielwoww/Outify-Nightcore-Mod/releases/latest). `arm64-v8a` fits most phones; `universal` works everywhere.
+2. If you have the official Outify app installed, uninstall it first. This fork is signed with its own key, so it can't update Outify in place.
+3. Log in with your Spotify account.
 
-Google for Jetpack Compose, Material Components and Icons
+Requires **Spotify Premium**.
 
-### Disclaimer
-Outify is not affiliated with Spotify, Google or librespot in any way. Usage of this app **can** be against Spotify ToS.
-Use at your own risk.
+Speed applies to music playing on your phone. When another device (PC, speaker) is playing, Outify acts as a remote for it. Pick Outify under *Playback devices* to play on your phone.
 
-Made with ❤️ by TomKo
+## Screenshots
 
+<p>
+  <img src="docs/images/playerscreen.png" alt="Player" width="200" hspace="10"/>
+  <img src="docs/images/lyrics.png" alt="Lyrics" width="200" hspace="10"/>
+  <img src="docs/images/artist.png" alt="Artist view" width="200" hspace="10"/>
+  <img src="docs/images/liked.png" alt="Liked songs" width="200" hspace="10"/>
+</p>
+
+## Building
+
+See [docs/NIGHTCORE-MOD.md](./docs/NIGHTCORE-MOD.md) for build and release instructions, how each feature works, and how upstream updates are merged.
+
+## Credits
+
+- [iTomKo/Outify](https://github.com/iTomKo/Outify) by TomKo, the app this fork is built on. Please don't report problems that only happen in this mod to the Outify project.
+- [librespot](https://github.com/librespot-org/librespot) for the Spotify streaming backend
+- Outify's translators on [Weblate](https://translate.codeberg.org/engage/outify/)
+
+## License and disclaimer
+
+Licensed under [GPL-3.0](./LICENSE), like Outify. Not affiliated with Spotify, Google, librespot or the Outify project. Using this app **can** be against Spotify's Terms of Service. Use at your own risk.
